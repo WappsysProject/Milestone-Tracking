@@ -161,7 +161,7 @@
   appId: "PASTE_HERE"
 };</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -339,8 +339,12 @@ function load(){
         renderAll();
         const mode = document.getElementById("storageMode");
         if(mode) mode.textContent = "Firebase Shared Database";
+      } else if(remoteData === null) {
+        firebaseDBRef.set(db || {projects: []});
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase Shared Database - initialized";
+        renderAll();
       } else {
-        firebaseDBRef.set(db);
         renderAll();
       }
     }, error => {
@@ -538,6 +542,21 @@ function exportAllCSV(){
   const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Department","Task","Owner","Due Date","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
   db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,t.dept,t.task,t.owner,t.dueDate,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
   downloadFile("all-projects-tracker.csv", csv(rows), "text/csv");
+}
+function testFirebaseWrite(){
+  if(!(firebaseReady && firebaseDBRef)){
+    alert("Firebase is not initialized. Check code/config.");
+    return;
+  }
+  firebaseDBRef.child("connectionTest").set({
+    message: "Firebase write test successful",
+    at: new Date().toLocaleString()
+  }).then(()=>{
+    alert("Firebase test write successful. Check Firebase Data tab for projectTrackerDB > connectionTest.");
+  }).catch(error=>{
+    console.error(error);
+    alert("Firebase test write failed: " + error.message);
+  });
 }
 function downloadBackup(){ downloadFile("project-tracker-backup.json", JSON.stringify(db,null,2), "application/json"); }
 function restoreBackup(e){
