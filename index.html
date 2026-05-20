@@ -148,8 +148,7 @@
       <div class="card">
         <h2>Free Hosting + Shared Data Setup</h2>
         <div class="note">
-          For shared multi-user tracking while remaining free, host this HTML on GitHub Pages / Netlify / Vercel and paste your Firebase config below in the HTML.
-          Without Firebase config, this app automatically uses browser LocalStorage only.
+          This version is connected to Firebase Realtime Database for shared team tracking. LocalStorage is used only as a backup fallback if Firebase is unavailable.
         </div>
         <h3>Firebase Config Placeholder</h3>
         <div class="firebase-box">const firebaseConfig = {
@@ -161,7 +160,7 @@
   messagingSenderId: "PASTE_HERE",
   appId: "PASTE_HERE"
 };</div>
-        <p class="muted">Current mode: <b id="storageMode">LocalStorage</b></p>
+        <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
         <button class="blue" onclick="downloadBackup()">Download JSON Backup</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
@@ -170,7 +169,7 @@
   </section>
 </div>
 
-<div class="footer">Project Tracker | Static HTML + optional Firebase shared database</div>
+<div class="footer">Project Tracker | Firebase shared database enabled</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -179,6 +178,10 @@
   </div>
 </div>
 
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
 <script>
 const APP_PASSWORD = "admin123"; // Change before hosting.
 const STATUS = ["To Do","In Progress","Done"];
@@ -186,8 +189,27 @@ const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","
 let db = { projects: [] };
 let currentProjectId = null;
 
-/* Optional Firebase support: paste SDK scripts + config here if required.
-   This file works without Firebase using LocalStorage. */
+const firebaseConfig = {
+  apiKey: "AIzaSyAYPImuLFhtkn-go0BL8QjwxIHVxpj870Y",
+  authDomain: "wapp-project-tracking.firebaseapp.com",
+  databaseURL: "https://wapp-project-tracking-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "wapp-project-tracking",
+  storageBucket: "wapp-project-tracking.firebasestorage.app",
+  messagingSenderId: "34102977368",
+  appId: "1:34102977368:web:c3b129a288f4747c9b7b2d"
+};
+
+let firebaseReady = false;
+let firebaseDBRef = null;
+
+try {
+  firebase.initializeApp(firebaseConfig);
+  firebaseDBRef = firebase.database().ref("projectTrackerDB");
+  firebaseReady = true;
+} catch (error) {
+  console.error("Firebase initialization failed. Falling back to LocalStorage.", error);
+  firebaseReady = false;
+}
 
 const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Order scrutiny and get the final order"},
@@ -283,8 +305,54 @@ const WORKFLOW_TEMPLATE = [
 
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
 function today(){ return new Date().toISOString().slice(0,10); }
-function save(){ localStorage.setItem("projectTrackerDB", JSON.stringify(db)); renderAll(); }
-function load(){ db = JSON.parse(localStorage.getItem("projectTrackerDB") || '{"projects":[]}'); }
+function save(){
+  if(firebaseReady && firebaseDBRef){
+    firebaseDBRef.set(db)
+      .then(()=> {
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
+        renderAll();
+      })
+      .catch(error => {
+        console.error("Firebase save failed. Saving locally only.", error);
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+        alert("Could not save to Firebase. Saved only on this browser. Check Firebase rules/internet.");
+        renderAll();
+      });
+  } else {
+    localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+    renderAll();
+  }
+}
+
+function load(){
+  const localCopy = localStorage.getItem("projectTrackerDB");
+  if(localCopy){
+    try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [] }; }
+  }
+
+  if(firebaseReady && firebaseDBRef){
+    firebaseDBRef.on("value", snapshot => {
+      const remoteData = snapshot.val();
+      if(remoteData && Array.isArray(remoteData.projects)){
+        db = remoteData;
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
+        renderAll();
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase Shared Database";
+      } else {
+        firebaseDBRef.set(db);
+        renderAll();
+      }
+    }, error => {
+      console.error("Firebase load failed. Using LocalStorage.", error);
+      const mode = document.getElementById("storageMode");
+      if(mode) mode.textContent = "LocalStorage fallback";
+      renderAll();
+    });
+  } else {
+    renderAll();
+  }
+}
 function login(){
   if(document.getElementById("passwordInput").value === APP_PASSWORD){
     document.getElementById("loginScreen").classList.add("hidden");
@@ -481,5 +549,6 @@ function downloadFile(name, content, type){
 }
 load();
 </script>
+
 </body>
 </html>
