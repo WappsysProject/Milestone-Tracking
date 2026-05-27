@@ -58,6 +58,21 @@
     .note{background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px;color:#7c2d12;font-size:13px}
     .firebase-box{background:#f8fafc;border:1px dashed #94a3b8;padding:12px;border-radius:10px;font-family:monospace;font-size:12px;white-space:pre-wrap}
     .footer{font-size:11px;color:var(--muted);text-align:center;padding:20px}
+
+    .health{font-weight:800;border-radius:999px;padding:5px 8px;display:inline-block;font-size:11px}
+    .health.green{background:#dcfce7;color:#166534}
+    .health.amber{background:#fef3c7;color:#92400e}
+    .health.red{background:#fee2e2;color:#991b1b}
+    .mini-row{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;border-bottom:1px solid #eef2f7;padding:8px 0;font-size:12px}
+    .mini-row:last-child{border-bottom:0}
+    .bar{height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:5px}
+    .bar > span{display:block;height:100%;background:var(--accent);border-radius:999px}
+    .alert-list{max-height:280px;overflow:auto}
+    .alert-item{border-left:4px solid var(--warn);padding:8px 8px;margin:8px 0;background:#fff7ed;border-radius:8px;font-size:12px}
+    .alert-item.overdue{border-left-color:var(--danger);background:#fef2f2}
+    .alert-item.today{border-left-color:var(--accent2);background:#eff6ff}
+    .pill{display:inline-block;border-radius:999px;background:#eef2f7;padding:3px 7px;font-size:11px;margin-top:4px;color:#334155}
+
   </style>
 </head>
 <body>
@@ -88,9 +103,31 @@
     <section id="dashboardView">
       <div class="grid grid-4">
         <div class="kpi"><div class="lbl">Total Projects</div><div class="num" id="kpiProjects">0</div></div>
+        <div class="kpi"><div class="lbl">On Track</div><div class="num" id="kpiOnTrack">0</div></div>
+        <div class="kpi"><div class="lbl">Delayed Projects</div><div class="num" id="kpiDelayedProjects">0</div></div>
+        <div class="kpi"><div class="lbl">Completed Projects</div><div class="num" id="kpiCompletedProjects">0</div></div>
         <div class="kpi"><div class="lbl">Avg Completion</div><div class="num" id="kpiCompletion">0%</div></div>
-        <div class="kpi"><div class="lbl">Pending Tasks</div><div class="num" id="kpiPending">0</div></div>
-        <div class="kpi"><div class="lbl">Due / Overdue Tasks</div><div class="num" id="kpiDue">0</div></div>
+        <div class="kpi"><div class="lbl">Overdue Tasks</div><div class="num" id="kpiOverdueTasks">0</div></div>
+        <div class="kpi"><div class="lbl">Due Today</div><div class="num" id="kpiDueToday">0</div></div>
+        <div class="kpi"><div class="lbl">Due This Week</div><div class="num" id="kpiDueWeek">0</div></div>
+      </div>
+
+      <div class="grid grid-3" style="margin-top:16px">
+        <div class="card">
+          <h3 style="margin-top:0">Department Progress</h3>
+          <div id="deptDashboard"></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">Due Date Alerts</h3>
+          <div id="alertDashboard"></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">My Tasks</h3>
+          <div class="row" style="margin-bottom:10px">
+            <input id="myTaskOwner" placeholder="Type owner name/email" oninput="renderDashboard()" />
+          </div>
+          <div id="myTasksDashboard"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -101,6 +138,12 @@
             <button class="primary" onclick="openProjectForm()">+ Add Project</button>
             <button class="blue" onclick="exportAllCSV()">Export All CSV</button>
           </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0">Current Stage Tracker</h3>
+        <div style="overflow:auto">
+          <table id="currentStageTable"></table>
         </div>
       </div>
       <div id="projectsList" class="grid grid-3"></div>
@@ -370,10 +413,39 @@ function showProjectView(){ setTab("projectTab"); hideAll(); document.getElement
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
 function hideAll(){ ["dashboardView","projectView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
+function daysFromToday(dateStr){
+  if(!dateStr) return null;
+  const d = new Date(dateStr + "T00:00:00");
+  const t = new Date(today() + "T00:00:00");
+  return Math.round((d - t) / (1000*60*60*24));
+}
+function isOverdueTask(t){ return t.dueDate && t.status !== "Done" && daysFromToday(t.dueDate) < 0; }
+function isDueTodayTask(t){ return t.dueDate && t.status !== "Done" && daysFromToday(t.dueDate) === 0; }
+function isDueThisWeekTask(t){ const d = daysFromToday(t.dueDate); return t.dueDate && t.status !== "Done" && d >= 0 && d <= 7; }
+function isCriticalTask(t){ return String(t.critical || "").toLowerCase() === "yes" || String(t.priority || "").toLowerCase() === "critical"; }
+
 function stats(p){
-  const total=p.tasks.length, done=p.tasks.filter(t=>t.status==="Done").length, progress=p.tasks.filter(t=>t.status==="In Progress").length, todo=p.tasks.filter(t=>t.status==="To Do").length;
-  const overdue=p.tasks.filter(t=>t.dueDate && t.status!=="Done" && t.dueDate < today()).length;
-  return {total,done,progress,todo,overdue,completion: total?Math.round(done*100/total):0};
+  const total=p.tasks.length;
+  const done=p.tasks.filter(t=>t.status==="Done").length;
+  const progress=p.tasks.filter(t=>t.status==="In Progress").length;
+  const todo=p.tasks.filter(t=>t.status==="To Do").length;
+  const overdue=p.tasks.filter(isOverdueTask).length;
+  const dueToday=p.tasks.filter(isDueTodayTask).length;
+  const dueWeek=p.tasks.filter(isDueThisWeekTask).length;
+  const criticalOverdue=p.tasks.filter(t=>isOverdueTask(t) && isCriticalTask(t)).length;
+  const completion= total?Math.round(done*100/total):0;
+  const health = overdue===0 ? "Green" : (overdue<=3 && criticalOverdue===0 ? "Amber" : "Red");
+  return {total,done,progress,todo,overdue,dueToday,dueWeek,criticalOverdue,completion,health};
+}
+function healthBadge(health){
+  const c = health==="Green" ? "green" : health==="Amber" ? "amber" : "red";
+  return `<span class="health ${c}">${health}</span>`;
+}
+function nextPendingTask(p){
+  const pending = p.tasks
+    .filter(t=>t.status!=="Done")
+    .sort((a,b)=>(a.dueDate||"9999-12-31").localeCompare(b.dueDate||"9999-12-31"))[0];
+  return pending || null;
 }
 function getCurrentStage(p){
   const pending=p.tasks.find(t=>t.status!=="Done");
@@ -381,27 +453,144 @@ function getCurrentStage(p){
 }
 function renderDashboard(){
   const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
+  const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
   const list=document.getElementById("projectsList"); if(!list) return;
-  const filtered=db.projects.filter(p=>(p.name+p.client+p.jobCode+p.location).toLowerCase().includes(q));
-  document.getElementById("kpiProjects").textContent=db.projects.length;
-  const avg=db.projects.length?Math.round(db.projects.reduce((a,p)=>a+stats(p).completion,0)/db.projects.length):0;
-  document.getElementById("kpiCompletion").textContent=avg+"%";
-  document.getElementById("kpiPending").textContent=db.projects.reduce((a,p)=>a+stats(p).todo+stats(p).progress,0);
-  document.getElementById("kpiDue").textContent=db.projects.reduce((a,p)=>a+stats(p).overdue,0);
+
+  const allStats = db.projects.map(p=>({p, s:stats(p)}));
+  const filtered=db.projects.filter(p=>(p.name+p.client+p.jobCode+p.location+p.manager).toLowerCase().includes(q));
+
+  const totalProjects=db.projects.length;
+  const completedProjects=allStats.filter(x=>x.s.completion===100).length;
+  const delayedProjects=allStats.filter(x=>x.s.overdue>0).length;
+  const onTrack=allStats.filter(x=>x.s.overdue===0 && x.s.completion<100).length;
+  const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
+  const overdueTasks=allStats.reduce((a,x)=>a+x.s.overdue,0);
+  const dueToday=allStats.reduce((a,x)=>a+x.s.dueToday,0);
+  const dueWeek=allStats.reduce((a,x)=>a+x.s.dueWeek,0);
+
+  setText("kpiProjects",totalProjects);
+  setText("kpiOnTrack",onTrack);
+  setText("kpiDelayedProjects",delayedProjects);
+  setText("kpiCompletedProjects",completedProjects);
+  setText("kpiCompletion",avg+"%");
+  setText("kpiOverdueTasks",overdueTasks);
+  setText("kpiDueToday",dueToday);
+  setText("kpiDueWeek",dueWeek);
+
+  renderDepartmentDashboard();
+  renderAlertsDashboard();
+  renderMyTasksDashboard(myOwner);
+  renderCurrentStageTable(filtered);
+
   list.innerHTML = filtered.map(p=>{
     const s=stats(p);
+    const next=nextPendingTask(p);
     return `<div class="card project-card" onclick="openProject('${p.id}')">
-      <h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>
+      <div class="toolbar">
+        <h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>
+        ${healthBadge(s.health)}
+      </div>
       <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
       <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
-      <div class="summary-line"><b>Stage</b><span>${esc(getCurrentStage(p))}</span></div>
-      <div class="summary-line"><b>Due Date</b><span>${esc(p.targetDate||"-")}</span></div>
+      <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
+      <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
+      <div class="summary-line"><b>Next Due</b><span>${next ? esc(next.dueDate||"-") : "-"}</span></div>
       <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
-      <div style="height:9px;background:#e5e7eb;border-radius:999px;margin-top:12px"><div style="height:9px;width:${s.completion}%;background:var(--accent);border-radius:999px"></div></div>
+      <div class="bar"><span style="width:${s.completion}%"></span></div>
       <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
     </div>`;
   }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
 }
+
+function setText(id,val){ const el=document.getElementById(id); if(el) el.textContent=val; }
+
+function renderCurrentStageTable(projects){
+  const el=document.getElementById("currentStageTable"); if(!el) return;
+  let rows=`<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Due Date</th></tr>`;
+  projects.forEach(p=>{
+    const s=stats(p);
+    const next=nextPendingTask(p);
+    const stageParts=getCurrentStage(p).split(" / ");
+    rows += `<tr>
+      <td><b>${esc(p.name||"Untitled Project")}</b><br><span class="muted">${esc(p.jobCode||"")}</span></td>
+      <td>${healthBadge(s.health)}</td>
+      <td>${s.completion}%</td>
+      <td>${esc(stageParts[0]||"-")}</td>
+      <td>${esc(stageParts[1]||"-")}</td>
+      <td>${next ? esc(next.task) : "All tasks completed"}</td>
+      <td>${next ? esc(next.owner||"-") : "-"}</td>
+      <td>${next ? esc(next.dueDate||"-") : "-"}</td>
+    </tr>`;
+  });
+  el.innerHTML=rows;
+}
+
+function renderDepartmentDashboard(){
+  const el=document.getElementById("deptDashboard"); if(!el) return;
+  const data={};
+  DEPARTMENTS.forEach(d=>data[d]={total:0,todo:0,progress:0,done:0,overdue:0});
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
+    if(!data[t.dept]) data[t.dept]={total:0,todo:0,progress:0,done:0,overdue:0};
+    data[t.dept].total++;
+    if(t.status==="Done") data[t.dept].done++;
+    else if(t.status==="In Progress") data[t.dept].progress++;
+    else data[t.dept].todo++;
+    if(isOverdueTask(t)) data[t.dept].overdue++;
+  }));
+  el.innerHTML = Object.entries(data).map(([dept,d])=>{
+    const comp=d.total?Math.round(d.done*100/d.total):0;
+    return `<div class="mini-row">
+      <div>
+        <b>${esc(dept)}</b>
+        <div class="muted">To Do: ${d.todo} · In Progress: ${d.progress} · Done: ${d.done} · Overdue: ${d.overdue}</div>
+        <div class="bar"><span style="width:${comp}%"></span></div>
+      </div>
+      <b>${comp}%</b>
+    </div>`;
+  }).join("");
+}
+
+function renderAlertsDashboard(){
+  const el=document.getElementById("alertDashboard"); if(!el) return;
+  const alerts=[];
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
+    if(t.status==="Done") return;
+    if(isOverdueTask(t)) alerts.push({type:"overdue", project:p, task:t, label:"Overdue"});
+    else if(isDueTodayTask(t)) alerts.push({type:"today", project:p, task:t, label:"Due Today"});
+    else if(isDueThisWeekTask(t)) alerts.push({type:"week", project:p, task:t, label:"Due This Week"});
+  }));
+  alerts.sort((a,b)=>(a.task.dueDate||"9999-12-31").localeCompare(b.task.dueDate||"9999-12-31"));
+  el.innerHTML = `<div class="alert-list">` + (alerts.slice(0,12).map(a=>`
+    <div class="alert-item ${a.type}">
+      <b>${esc(a.label)}:</b> ${esc(a.task.task)}
+      <div class="muted">${esc(a.project.name||"Project")} · ${esc(a.task.dept)} · Owner: ${esc(a.task.owner||"-")} · Due: ${esc(a.task.dueDate||"-")}</div>
+    </div>`).join("") || `<p class="muted">No overdue or upcoming tasks.</p>`) + `</div>`;
+}
+
+function renderMyTasksDashboard(owner){
+  const el=document.getElementById("myTasksDashboard"); if(!el) return;
+  if(!owner){
+    el.innerHTML = `<p class="muted">Type owner name/email to see assigned tasks.</p>`;
+    return;
+  }
+  const tasks=[];
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
+    if(String(t.owner||"").toLowerCase().includes(owner) && t.status!=="Done") tasks.push({project:p, task:t});
+  }));
+  tasks.sort((a,b)=>(a.task.dueDate||"9999-12-31").localeCompare(b.task.dueDate||"9999-12-31"));
+  el.innerHTML = tasks.slice(0,12).map(x=>{
+    const label = isOverdueTask(x.task) ? "Overdue" : isDueTodayTask(x.task) ? "Due Today" : isDueThisWeekTask(x.task) ? "Due This Week" : x.task.status;
+    return `<div class="mini-row">
+      <div>
+        <b>${esc(x.task.task)}</b>
+        <div class="muted">${esc(x.project.name||"Project")} · ${esc(x.task.dept)}</div>
+        <span class="pill">${esc(label)}</span>
+      </div>
+      <span>${esc(x.task.dueDate||"-")}</span>
+    </div>`;
+  }).join("") || `<p class="muted">No pending tasks found for this owner.</p>`;
+}
+
 function openProject(id){ currentProjectId=id; showProjectView(); }
 function renderProject(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
