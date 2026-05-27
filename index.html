@@ -87,6 +87,10 @@
     }
     @media(min-width:761px){#mobileTaskCards{display:none}}
 
+
+    .role-badge{display:inline-block;border-radius:999px;background:#e0f2fe;color:#075985;padding:4px 9px;font-size:11px;font-weight:800}
+    .lock-note{background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font-size:12px;color:#334155;margin-top:8px}
+    .admin-panel{background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
   </style>
 </head>
 <body>
@@ -98,9 +102,9 @@
 <div class="wrap">
   <section id="loginScreen" class="login card">
     <h2>Login</h2>
-    <p class="muted">Default password: <b>admin123</b>. Change it inside the HTML before hosting.</p>
-    <label>Your Name / Email</label>
-    <input id="userInput" type="text" placeholder="Example: Mohit or mohit@company.com"/>
+    <p class="muted">Use assigned email/password. Default admin: <b>admin@wapp.com / admin123</b></p>
+    <label>Email</label>
+    <input id="userInput" type="email" placeholder="Example: mohit@company.com"/>
     <label>Password</label>
     <input id="passwordInput" type="password" placeholder="Enter password"/>
     <div style="margin-top:12px" class="row">
@@ -117,6 +121,27 @@
     </div>
 
     <section id="dashboardView">
+      <div class="card">
+        <div class="toolbar">
+          <div>
+            <h3 style="margin:0">Logged-in User</h3>
+            <p class="muted" id="userProfileBox">Not logged in</p>
+          </div>
+          <button onclick="logout()">Logout</button>
+        </div>
+        <div id="adminUserPanel" class="admin-panel hidden">
+          <h3 style="margin-top:0">Admin: Add / Update User</h3>
+          <div class="grid grid-4">
+            <div><label>Email</label><input id="newUserEmail" placeholder="user@company.com"></div>
+            <div><label>Name</label><input id="newUserName" placeholder="User name"></div>
+            <div><label>Password</label><input id="newUserPassword" placeholder="Password"></div>
+            <div><label>Role</label><select id="newUserRole"><option>Admin</option><option>PM</option><option>Team</option><option>Viewer</option></select></div>
+          </div>
+          <button class="primary" style="margin-top:10px" onclick="addOrUpdateUser()">Save User</button>
+          <div class="lock-note">Admin: everything. PM: project/task management. Team: assigned task updates. Viewer: read only.</div>
+        </div>
+      </div>
+
       <div class="grid grid-4">
         <div class="kpi"><div class="lbl">Total Projects</div><div class="num" id="kpiProjects">0</div></div>
         <div class="kpi"><div class="lbl">On Track</div><div class="num" id="kpiOnTrack">0</div></div>
@@ -136,6 +161,10 @@
         <div class="card">
           <h3 style="margin-top:0">Due Date Alerts</h3>
           <div id="alertDashboard"></div>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0">System Notifications</h3>
+          <div id="notificationDashboard"></div>
         </div>
         <div class="card">
           <h3 style="margin-top:0">My Tasks</h3>
@@ -213,7 +242,7 @@
       <div class="card">
         <h2>Free Hosting + Shared Data Setup</h2>
         <div class="note">
-          This version is connected to Firebase Realtime Database for shared team tracking. LocalStorage is used only as a backup fallback if Firebase is unavailable.
+          This version is connected to Firebase Realtime Database for shared team tracking. It includes role-based access control, in-app alerts, activity logs, and LocalStorage fallback if Firebase is unavailable.
         </div>
         <h3>Firebase Config Placeholder</h3>
         <div class="firebase-box">const firebaseConfig = {
@@ -254,6 +283,9 @@ const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","
 let db = { projects: [] };
 let currentProjectId = null;
 let currentUser = "Unknown User";
+let currentUserEmail = "";
+let currentUserRole = "Viewer";
+let currentUserRecord = null;
 
 const firebaseConfig = {
   apiKey: "AIzaSyAYPImuLFhtkn-go0BL8QjwxIHVxpj870Y",
@@ -275,6 +307,55 @@ try {
 } catch (error) {
   console.error("Firebase initialization failed. Falling back to LocalStorage.", error);
   firebaseReady = false;
+}
+
+
+const DEFAULT_USERS = {
+  "admin@wapp.com": {name:"Admin", password:"admin123", role:"Admin"}
+};
+
+function ensureUsers(){
+  if(!db.users) db.users = {};
+  Object.keys(DEFAULT_USERS).forEach(email=>{
+    if(!db.users[email]) db.users[email] = DEFAULT_USERS[email];
+  });
+}
+
+function canEditProject(){ return currentUserRole==="Admin" || currentUserRole==="PM"; }
+function canDelete(){ return currentUserRole==="Admin"; }
+function canFullEditTask(task){ return currentUserRole==="Admin" || currentUserRole==="PM"; }
+function canEditTask(task){
+  if(currentUserRole==="Admin" || currentUserRole==="PM") return true;
+  if(currentUserRole==="Team"){
+    const owner=String(task.owner||"").toLowerCase();
+    return owner.includes(currentUserEmail.toLowerCase()) || owner.includes(String(currentUser||"").toLowerCase());
+  }
+  return false;
+}
+function requirePermission(ok,msg){
+  if(ok) return true;
+  alert(msg || "You do not have permission for this action.");
+  return false;
+}
+function updateUserProfileBox(){
+  const el=document.getElementById("userProfileBox");
+  if(el) el.innerHTML = `<b>${esc(currentUser)}</b> · ${esc(currentUserEmail)} · <span class="role-badge">${esc(currentUserRole)}</span>`;
+  const admin=document.getElementById("adminUserPanel");
+  if(admin) admin.classList.toggle("hidden", currentUserRole!=="Admin");
+}
+function logout(){ location.reload(); }
+function addOrUpdateUser(){
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can add/update users.")) return;
+  const email=(document.getElementById("newUserEmail").value||"").trim().toLowerCase();
+  const name=(document.getElementById("newUserName").value||"").trim();
+  const password=(document.getElementById("newUserPassword").value||"").trim();
+  const role=document.getElementById("newUserRole").value;
+  if(!email || !name || !password){ alert("Please fill email, name and password."); return; }
+  ensureUsers();
+  db.users[email]={name,password,role};
+  addGlobalActivity({id:"",name:"System"},{id:"",task:"User management"},"User Saved",`${email} saved as ${role}`);
+  save();
+  alert("User saved. Share the email/password with the user.");
 }
 
 const WORKFLOW_TEMPLATE = [
@@ -417,21 +498,33 @@ function load(){
       console.error("Firebase load failed. Using LocalStorage.", error);
       const mode = document.getElementById("storageMode");
       if(mode) mode.textContent = "LocalStorage fallback";
-      renderAll();
+      ensureUsers();
+        renderAll();
     });
   } else {
+    ensureUsers();
     renderAll();
   }
 }
 function login(){
-  if(document.getElementById("passwordInput").value === APP_PASSWORD){
-    currentUser = (document.getElementById("userInput")?.value || "Unknown User").trim() || "Unknown User";
+  const email=(document.getElementById("userInput")?.value || "").trim().toLowerCase();
+  const password=document.getElementById("passwordInput").value;
+  ensureUsers();
+  const user=db.users[email];
+  if(user && user.password === password){
+    currentUser = user.name || email;
+    currentUserEmail = email;
+    currentUserRole = user.role || "Viewer";
+    currentUserRecord = user;
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
-    load(); renderAll();
-  } else document.getElementById("loginError").textContent = "Incorrect password.";
+    updateUserProfileBox();
+    renderAll();
+  } else {
+    document.getElementById("loginError").textContent = "Incorrect email or password.";
+  }
 }
-function renderAll(){ renderDashboard(); if(currentProjectId) renderProject(); }
+function renderAll(){ ensureUsers(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
@@ -503,6 +596,7 @@ function renderDashboard(){
 
   renderDepartmentDashboard();
   renderAlertsDashboard();
+  renderNotificationDashboard();
   renderActivityFeed();
   renderMyTasksDashboard(myOwner);
   renderCurrentStageTable(filtered);
@@ -604,6 +698,23 @@ function renderAlertsDashboard(){
     </div>`).join("") || `<p class="muted">No overdue or upcoming tasks.</p>`) + `</div>`;
 }
 
+function renderNotificationDashboard(){
+  const el=document.getElementById("notificationDashboard"); if(!el) return;
+  const notifications=[];
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
+    if(t.status==="Done") return;
+    if(!t.owner) notifications.push({level:"Missing Owner", project:p, task:t});
+    if(!t.dueDate) notifications.push({level:"Missing Due Date", project:p, task:t});
+    if(typeof isOverdueTask==="function" && isOverdueTask(t)) notifications.push({level:"Escalation Required", project:p, task:t});
+  }));
+  el.innerHTML = notifications.slice(0,12).map(n=>`
+    <div class="alert-item ${n.level==='Escalation Required'?'overdue':''}">
+      <b>${esc(n.level)}</b>: ${esc(n.task.task)}
+      <div class="muted">${esc(n.project.name||"Project")} · ${esc(n.task.dept)} · Owner: ${esc(n.task.owner||"-")} · Due: ${esc(n.task.dueDate||"-")}</div>
+    </div>
+  `).join("") || `<p class="muted">No system notifications.</p>`;
+}
+
 function renderMyTasksDashboard(owner){
   const el=document.getElementById("myTasksDashboard"); if(!el) return;
   if(!owner){
@@ -680,6 +791,7 @@ function renderProject(){
 }
 function badge(st){ const c=st==="Done"?"done":st==="In Progress"?"progress":"todo"; return `<span class="status ${c}">${esc(st||"To Do")}</span>`; }
 function openProjectForm(id){
+  if(!requirePermission(canEditProject(), "Only Admin/PM can add or edit project details.")) return;
   const p=id?db.projects.find(x=>x.id===id):{};
   document.getElementById("modalTitle").textContent=id?"Edit Project":"Add Project";
   document.getElementById("modalBody").innerHTML=`<div class="grid grid-3">
@@ -723,6 +835,8 @@ function addGlobalActivity(project, task, action, details){
 function updateTaskField(projectId, taskId, field, value){
   const p=db.projects.find(x=>x.id===projectId); if(!p) return;
   const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
+  if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
+  if((field==="owner" || field==="dueDate") && !(currentUserRole==="Admin" || currentUserRole==="PM")){ alert("Only Admin/PM can change owner or due date."); renderProject(); return; }
   const oldValue=t[field] || "";
   if(oldValue === value) return;
   t[field]=value;
@@ -755,6 +869,8 @@ function saveProject(id){
 function v(id){ return document.getElementById("f_"+id).value.trim(); }
 function openTaskForm(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=taskId?p.tasks.find(x=>x.id===taskId):{status:"To Do"};
+  if(taskId && !requirePermission(canFullEditTask(t), "Only Admin/PM can fully edit task details.")) return;
+  if(!taskId && !requirePermission(canEditProject(), "Only Admin/PM can add new tasks.")) return;
   document.getElementById("modalTitle").textContent=taskId?"Edit Task":"Add Task";
   document.getElementById("modalBody").innerHTML=`<div class="grid grid-3">
     ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)} 
@@ -791,6 +907,7 @@ function saveTask(id){
   closeModal(); save();
 }
 function autoAssignCurrentProject(){
+  if(!requirePermission(canEditProject(), "Only Admin/PM can auto-assign owners.")) return;
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
   let count=0;
   p.tasks.forEach(task=>{
@@ -815,8 +932,8 @@ function showTaskHistory(taskId){
   document.getElementById("modalBody").innerHTML=`<h3>${esc(t.task)}</h3><table><tr><th>Time</th><th>Updated By</th><th>Action</th><th>Details</th></tr>${rows}</table><div class="row" style="margin-top:16px"><button onclick="closeModal()">Close</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
 }
-function deleteTask(id){ if(confirm("Delete this task?")){ const p=db.projects.find(x=>x.id===currentProjectId); const task=p.tasks.find(t=>t.id===id); addGlobalActivity(p,task||{id,task:"Deleted task"},"Task Deleted","Task deleted"); p.tasks=p.tasks.filter(t=>t.id!==id); save(); } }
-function deleteCurrentProject(){ if(confirm("Delete current project?")){ const p=db.projects.find(x=>x.id===currentProjectId); addGlobalActivity(p,{id:"",task:"Project deleted"},"Project Deleted","Project deleted"); db.projects=db.projects.filter(p=>p.id!==currentProjectId); currentProjectId=null; save(); showDashboard(); } }
+function deleteTask(id){ if(!requirePermission(canDelete(),"Only Admin can delete tasks.")) return; if(confirm("Delete this task?")){ const p=db.projects.find(x=>x.id===currentProjectId); const task=p.tasks.find(t=>t.id===id); addGlobalActivity(p,task||{id,task:"Deleted task"},"Task Deleted","Task deleted"); p.tasks=p.tasks.filter(t=>t.id!==id); save(); } }
+function deleteCurrentProject(){ if(!requirePermission(canDelete(),"Only Admin can delete projects.")) return; if(confirm("Delete current project?")){ const p=db.projects.find(x=>x.id===currentProjectId); addGlobalActivity(p,{id:"",task:"Project deleted"},"Project Deleted","Project deleted"); db.projects=db.projects.filter(p=>p.id!==currentProjectId); currentProjectId=null; save(); showDashboard(); } }
 function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
 function esc(s){ return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])); }
 function escAttr(s){ return esc(s).replace(/"/g,"&quot;"); }
