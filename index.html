@@ -73,6 +73,20 @@
     .alert-item.today{border-left-color:var(--accent2);background:#eff6ff}
     .pill{display:inline-block;border-radius:999px;background:#eef2f7;padding:3px 7px;font-size:11px;margin-top:4px;color:#334155}
 
+
+    .inline-input,.inline-select{min-width:120px;padding:6px 7px;font-size:12px;border-radius:7px}
+    .activity-feed{max-height:320px;overflow:auto}
+    .activity-item{padding:9px 0;border-bottom:1px solid #eef2f7;font-size:12px}
+    .activity-item:last-child{border-bottom:0}
+    .activity-time{color:var(--muted);font-size:11px;margin-top:3px}
+    .mobile-task-card{display:none;background:#fff;border:1px solid var(--border);border-radius:12px;padding:12px;margin:10px 0;box-shadow:var(--shadow)}
+    @media(max-width:760px){
+      #taskTable{display:none}
+      #mobileTaskCards{display:block}
+      .mobile-task-card{display:block}
+    }
+    @media(min-width:761px){#mobileTaskCards{display:none}}
+
   </style>
 </head>
 <body>
@@ -85,6 +99,8 @@
   <section id="loginScreen" class="login card">
     <h2>Login</h2>
     <p class="muted">Default password: <b>admin123</b>. Change it inside the HTML before hosting.</p>
+    <label>Your Name / Email</label>
+    <input id="userInput" type="text" placeholder="Example: Mohit or mohit@company.com"/>
     <label>Password</label>
     <input id="passwordInput" type="password" placeholder="Enter password"/>
     <div style="margin-top:12px" class="row">
@@ -141,6 +157,11 @@
         </div>
       </div>
       <div class="card">
+        <h3 style="margin-top:0">Recent Activity</h3>
+        <div id="activityFeed" class="activity-feed"></div>
+      </div>
+
+      <div class="card">
         <h3 style="margin-top:0">Current Stage Tracker</h3>
         <div style="overflow:auto">
           <table id="currentStageTable"></table>
@@ -184,6 +205,7 @@
         <div style="overflow:auto;max-height:72vh;margin-top:12px">
           <table id="taskTable"></table>
         </div>
+        <div id="mobileTaskCards"></div>
       </div>
     </section>
 
@@ -231,6 +253,7 @@ const STATUS = ["To Do","In Progress","Done"];
 const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","Projects Team"];
 let db = { projects: [] };
 let currentProjectId = null;
+let currentUser = "Unknown User";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAYPImuLFhtkn-go0BL8QjwxIHVxpj870Y",
@@ -402,6 +425,7 @@ function load(){
 }
 function login(){
   if(document.getElementById("passwordInput").value === APP_PASSWORD){
+    currentUser = (document.getElementById("userInput")?.value || "Unknown User").trim() || "Unknown User";
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     load(); renderAll();
@@ -479,6 +503,7 @@ function renderDashboard(){
 
   renderDepartmentDashboard();
   renderAlertsDashboard();
+  renderActivityFeed();
   renderMyTasksDashboard(myOwner);
   renderCurrentStageTable(filtered);
 
@@ -503,6 +528,18 @@ function renderDashboard(){
 }
 
 function setText(id,val){ const el=document.getElementById(id); if(el) el.textContent=val; }
+
+function renderActivityFeed(){
+  const el=document.getElementById("activityFeed"); if(!el) return;
+  const activity=(db.activity||[]).slice(0,25);
+  el.innerHTML = activity.map(a=>`
+    <div class="activity-item">
+      <b>${esc(a.by||"Someone")}</b> ${esc(a.action||"updated")} <b>${esc(a.taskName||"")}</b>
+      <div class="muted">${esc(a.projectName||"")} · ${esc(a.details||"")}</div>
+      <div class="activity-time">${esc(a.at||"")}</div>
+    </div>
+  `).join("") || `<p class="muted">No activity yet.</p>`;
+}
 
 function renderCurrentStageTable(projects){
   const el=document.getElementById("currentStageTable"); if(!el) return;
@@ -611,13 +648,35 @@ function renderProject(){
     if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="12">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
       <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(t.dept)}</td><td>${esc(t.task)}</td>
-      <td>${esc(t.owner||"")}</td><td>${esc(t.dueDate||"")}</td><td>${badge(t.status)}</td>
+      <td><input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(t.dueDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)"></td>
+      <td><select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
       <td>${esc(t.remarks||"")}</td><td>${esc(t.delayReason||"")}</td><td>${esc(t.lastUpdated||"")}</td>
       <td><button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button></td>
-      <td><button class="small primary" onclick="openTaskForm('${t.id}')">Edit</button> <button class="small danger" onclick="deleteTask('${t.id}')">Delete</button></td>
+      <td><button class="small primary" onclick="openTaskForm('${t.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${t.id}')">Delete</button></td>
     </tr>`;
   });
   document.getElementById("taskTable").innerHTML=html;
+
+  const mobile=document.getElementById("mobileTaskCards");
+  if(mobile){
+    mobile.innerHTML = tasks.map(t=>`
+      <div class="mobile-task-card">
+        <b>${esc(t.task)}</b>
+        <div class="muted">${esc(t.stage)} → ${esc(t.sub)} · ${esc(t.dept)}</div>
+        <label>Owner</label>
+        <input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())">
+        <label>Due Date</label>
+        <input class="inline-input" type="date" value="${escAttr(t.dueDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)">
+        <label>Status</label>
+        <select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select>
+        <div class="row" style="margin-top:8px">
+          <button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button>
+          <button class="small primary" onclick="openTaskForm('${t.id}')">Full Edit</button>
+        </div>
+      </div>
+    `).join("");
+  }
 }
 function badge(st){ const c=st==="Done"?"done":st==="In Progress"?"progress":"todo"; return `<span class="status ${c}">${esc(st||"To Do")}</span>`; }
 function openProjectForm(id){
@@ -642,11 +701,45 @@ function defaultOwnerForDept(p, dept){
 }
 function addHistory(task, action, details){
   if(!task.history) task.history=[];
-  task.history.unshift({at:new Date().toLocaleString(), action, details});
+  task.history.unshift({at:new Date().toLocaleString(), action, details, by: currentUser || "Unknown User"});
+}
+
+function addGlobalActivity(project, task, action, details){
+  if(!db.activity) db.activity=[];
+  db.activity.unshift({
+    id: uid(),
+    at: new Date().toLocaleString(),
+    by: currentUser || "Unknown User",
+    projectId: project?.id || "",
+    projectName: project?.name || "",
+    taskId: task?.id || "",
+    taskName: task?.task || "",
+    action,
+    details
+  });
+  db.activity = db.activity.slice(0, 200);
+}
+
+function updateTaskField(projectId, taskId, field, value){
+  const p=db.projects.find(x=>x.id===projectId); if(!p) return;
+  const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
+  const oldValue=t[field] || "";
+  if(oldValue === value) return;
+  t[field]=value;
+  t.lastUpdated=new Date().toLocaleString();
+  const labelMap={status:"Status", owner:"Owner", dueDate:"Due Date"};
+  const details=`${labelMap[field]||field} changed from "${oldValue}" to "${value}"`;
+  addHistory(t,"Updated",details);
+  addGlobalActivity(p,t,"Task Updated",details);
+  save();
 }
 function saveProject(id){
   const data={name:v("name"),jobCode:v("jobCode"),client:v("client"),orderValue:v("orderValue"),technology:v("technology"),location:v("location"),startDate:v("startDate"),targetDate:v("targetDate"),manager:v("manager"),ownerContracts:v("ownerContracts"),ownerTechnical:v("ownerTechnical"),ownerPurchase:v("ownerPurchase"),ownerProjects:v("ownerProjects"),overallStatus:document.getElementById("f_overallStatus").value};
-  if(id){ Object.assign(db.projects.find(p=>p.id===id), data); }
+  if(id){ 
+    const existing=db.projects.find(p=>p.id===id);
+    Object.assign(existing, data);
+    addGlobalActivity(existing, {id:"", task:"Project details"}, "Project Updated", "Project details updated");
+  }
   else{
     const newProject={id:uid(),...data,tasks:[]};
     newProject.tasks=WORKFLOW_TEMPLATE.map((t,i)=>{
@@ -655,6 +748,7 @@ function saveProject(id){
       return task;
     });
     db.projects.push(newProject);
+    addGlobalActivity(newProject, {id:"", task:"Project created"}, "Project Created", "New project created with workflow template");
   }
   closeModal(); save();
 }
@@ -683,11 +777,16 @@ function saveTask(id){
       if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
     });
     Object.assign(task, data);
-    if(changes.length) addHistory(task,"Updated",changes.join("; "));
+    if(changes.length){
+      const detailText=changes.join("; ");
+      addHistory(task,"Updated",detailText);
+      addGlobalActivity(p,task,"Task Updated",detailText);
+    }
   } else {
     const task={id:uid(),...data,history:[]};
     addHistory(task,"Created","Task manually added");
     p.tasks.push(task);
+    addGlobalActivity(p,task,"Task Created","Task manually added");
   }
   closeModal(); save();
 }
@@ -700,7 +799,9 @@ function autoAssignCurrentProject(){
       const old=task.owner||"";
       task.owner=newOwner;
       task.lastUpdated=new Date().toLocaleString();
-      addHistory(task,"Auto-assigned",`Owner changed from "${old}" to "${newOwner}" based on department owner`);
+      const detail=`Owner changed from "${old}" to "${newOwner}" based on department owner`;
+      addHistory(task,"Auto-assigned",detail);
+      addGlobalActivity(p,task,"Auto-assigned",detail);
       count++;
     }
   });
@@ -710,12 +811,12 @@ function autoAssignCurrentProject(){
 function showTaskHistory(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=p.tasks.find(x=>x.id===taskId);
   document.getElementById("modalTitle").textContent="Tracking History";
-  const rows=(t.history||[]).map(h=>`<tr><td>${esc(h.at)}</td><td>${esc(h.action)}</td><td>${esc(h.details)}</td></tr>`).join("") || `<tr><td colspan="3">No history yet.</td></tr>`;
-  document.getElementById("modalBody").innerHTML=`<h3>${esc(t.task)}</h3><table><tr><th>Time</th><th>Action</th><th>Details</th></tr>${rows}</table><div class="row" style="margin-top:16px"><button onclick="closeModal()">Close</button></div>`;
+  const rows=(t.history||[]).map(h=>`<tr><td>${esc(h.at)}</td><td>${esc(h.by||"-")}</td><td>${esc(h.action)}</td><td>${esc(h.details)}</td></tr>`).join("") || `<tr><td colspan="4">No history yet.</td></tr>`;
+  document.getElementById("modalBody").innerHTML=`<h3>${esc(t.task)}</h3><table><tr><th>Time</th><th>Updated By</th><th>Action</th><th>Details</th></tr>${rows}</table><div class="row" style="margin-top:16px"><button onclick="closeModal()">Close</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
 }
-function deleteTask(id){ if(confirm("Delete this task?")){ const p=db.projects.find(x=>x.id===currentProjectId); p.tasks=p.tasks.filter(t=>t.id!==id); save(); } }
-function deleteCurrentProject(){ if(confirm("Delete current project?")){ db.projects=db.projects.filter(p=>p.id!==currentProjectId); currentProjectId=null; save(); showDashboard(); } }
+function deleteTask(id){ if(confirm("Delete this task?")){ const p=db.projects.find(x=>x.id===currentProjectId); const task=p.tasks.find(t=>t.id===id); addGlobalActivity(p,task||{id,task:"Deleted task"},"Task Deleted","Task deleted"); p.tasks=p.tasks.filter(t=>t.id!==id); save(); } }
+function deleteCurrentProject(){ if(confirm("Delete current project?")){ const p=db.projects.find(x=>x.id===currentProjectId); addGlobalActivity(p,{id:"",task:"Project deleted"},"Project Deleted","Project deleted"); db.projects=db.projects.filter(p=>p.id!==currentProjectId); currentProjectId=null; save(); showDashboard(); } }
 function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
 function esc(s){ return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])); }
 function escAttr(s){ return esc(s).replace(/"/g,"&quot;"); }
