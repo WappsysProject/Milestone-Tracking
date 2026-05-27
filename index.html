@@ -310,14 +310,39 @@ try {
 }
 
 
+function emailToKey(email){
+  return String(email || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
+}
+
 const DEFAULT_USERS = {
-  "admin@wapp.com": {name:"Admin", password:"admin123", role:"Admin"}
+  [emailToKey("admin@wapp.com")]: {email:"admin@wapp.com", name:"Admin", password:"admin123", role:"Admin", active:true}
 };
 
-function ensureUsers(){
+function normalizeUsers(){
   if(!db.users) db.users = {};
-  Object.keys(DEFAULT_USERS).forEach(email=>{
-    if(!db.users[email]) db.users[email] = DEFAULT_USERS[email];
+  const normalized = {};
+  Object.entries(db.users || {}).forEach(([key,user])=>{
+    if(!user) return;
+    const email = String(user.email || key || "").trim().toLowerCase();
+    if(!email) return;
+    const safeKey = emailToKey(email);
+    normalized[safeKey] = {
+      email,
+      name: user.name || email,
+      password: user.password || "",
+      role: user.role || "Viewer",
+      active: user.active !== false,
+      createdAt: user.createdAt || "",
+      updatedAt: user.updatedAt || ""
+    };
+  });
+  db.users = normalized;
+}
+
+function ensureUsers(){
+  normalizeUsers();
+  Object.keys(DEFAULT_USERS).forEach(key=>{
+    if(!db.users[key]) db.users[key] = DEFAULT_USERS[key];
   });
 }
 
@@ -352,10 +377,23 @@ function addOrUpdateUser(){
   const role=document.getElementById("newUserRole").value;
   if(!email || !name || !password){ alert("Please fill email, name and password."); return; }
   ensureUsers();
-  db.users[email]={name,password,role};
+  const userKey = emailToKey(email);
+  db.users[userKey]={
+    email,
+    name,
+    password,
+    role,
+    active:true,
+    updatedAt:new Date().toISOString(),
+    createdAt: db.users[userKey]?.createdAt || new Date().toISOString()
+  };
   addGlobalActivity({id:"",name:"System"},{id:"",task:"User management"},"User Saved",`${email} saved as ${role}`);
   save();
-  alert("User saved. Share the email/password with the user.");
+  document.getElementById("newUserEmail").value="";
+  document.getElementById("newUserName").value="";
+  document.getElementById("newUserPassword").value="";
+  document.getElementById("newUserRole").value="Team";
+  alert("User saved. Share the email/password with the user. They can now login from any device.");
 }
 
 const WORKFLOW_TEMPLATE = [
@@ -476,30 +514,33 @@ function load(){
   if(localCopy){
     try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [] }; }
   }
+  ensureUsers();
 
   if(firebaseReady && firebaseDBRef){
     firebaseDBRef.on("value", snapshot => {
       const remoteData = snapshot.val();
-      if(remoteData && Array.isArray(remoteData.projects)){
-        db = remoteData;
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
-        renderAll();
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database";
-      } else if(remoteData === null) {
-        firebaseDBRef.set(db || {projects: []});
+      if(remoteData === null) {
+        ensureUsers();
+        firebaseDBRef.set(db || {projects: [], users:{}});
         const mode = document.getElementById("storageMode");
         if(mode) mode.textContent = "Firebase Shared Database - initialized";
         renderAll();
       } else {
+        db = remoteData || {};
+        if(!Array.isArray(db.projects)) db.projects = [];
+        if(!Array.isArray(db.activity)) db.activity = [];
+        ensureUsers();
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
         renderAll();
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase Shared Database";
       }
     }, error => {
       console.error("Firebase load failed. Using LocalStorage.", error);
       const mode = document.getElementById("storageMode");
       if(mode) mode.textContent = "LocalStorage fallback";
       ensureUsers();
-        renderAll();
+      renderAll();
     });
   } else {
     ensureUsers();
@@ -510,16 +551,19 @@ function login(){
   const email=(document.getElementById("userInput")?.value || "").trim().toLowerCase();
   const password=document.getElementById("passwordInput").value;
   ensureUsers();
-  const user=db.users[email];
-  if(user && user.password === password){
+  const userKey = emailToKey(email);
+  const user=db.users[userKey];
+  if(user && user.password === password && user.active !== false){
     currentUser = user.name || email;
-    currentUserEmail = email;
+    currentUserEmail = user.email || email;
     currentUserRole = user.role || "Viewer";
     currentUserRecord = user;
     document.getElementById("loginScreen").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     updateUserProfileBox();
     renderAll();
+  } else if(user && user.active === false){
+    document.getElementById("loginError").textContent = "This user is inactive. Please contact admin.";
   } else {
     document.getElementById("loginError").textContent = "Incorrect email or password.";
   }
