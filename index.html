@@ -957,7 +957,12 @@ function openTaskForm(taskId){
 }
 function saveTask(id){
   const p=db.projects.find(x=>x.id===currentProjectId);
-  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),dueDate:v("dueDate"),initialPlanningDate:v("initialPlanningDate"),actualDate:v("actualDate"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
+  
+const autoDept = ["Process Team","Detail Engg Team","Electrical Team"].includes(document.getElementById("f_dept").value)
+ ? document.getElementById("f_dept").value
+ : mapTechnicalDepartment({technicalTask:v("technicalTask")});
+
+const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:autoDept,task:document.getElementById("f_task").value.trim(),owner:v("owner"),dueDate:v("dueDate"),initialPlanningDate:v("initialPlanningDate"),actualDate:v("actualDate"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
   if(id){
     const task=p.tasks.find(t=>t.id===id);
     const changes=[];
