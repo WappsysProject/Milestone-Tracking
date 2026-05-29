@@ -682,22 +682,57 @@ function renderActivityFeed(){
 function renderCurrentStageTable(projects){
   const el=document.getElementById("currentStageTable"); if(!el) return;
   let rows=`<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Due Date</th></tr>`;
-  projects.forEach(p=>{
-    const s=stats(p);
-    const next=nextPendingTask(p);
-    const stageParts=getCurrentStage(p).split(" / ");
-    rows += `<tr>
-      <td><b>${esc(p.name||"Untitled Project")}</b><br><span class="muted">${esc(p.jobCode||"")}</span></td>
-      <td>${healthBadge(s.health)}</td>
-      <td>${s.completion}%</td>
-      <td>${esc(stageParts[0]||"-")}</td>
-      <td>${esc(stageParts[1]||"-")}</td>
-      <td>${next ? esc(next.task) : "All tasks completed"}</td>
-      <td>${next ? esc(next.owner||"-") : "-"}</td>
-      <td>${next ? esc(next.dueDate||"-") : "-"}</td>
-    </tr>`;
+  
+projects.forEach(p=>{
+  p.tasks.forEach(t=>{
+
+    if(t.technicalTask){
+      t.dept = mapTechnicalDepartment(t);
+    }
+
+    // Explicit task-level corrections
+    const name=(t.task||"").toLowerCase();
+
+    // Process Team
+    if(
+      name.includes("proposal") ||
+      name.includes("process") ||
+      name.includes("control philosophy") ||
+      name.includes("execution go-ahead") ||
+      name.includes("final technical support")
+    ){
+      t.dept="Process Team";
+    }
+
+    // Detail Engg Team
+    if(
+      name.includes("design") ||
+      name.includes("layout") ||
+      name.includes("drawing") ||
+      name.includes("fabrication") ||
+      name.includes("site visit") ||
+      name.includes("quality control") ||
+      name.includes("dispatch") ||
+      name.includes("billing schedule")
+    ){
+      t.dept="Detail Engg Team";
+    }
+
+    // Electrical Team
+    if(
+      name.includes("electrical") ||
+      name.includes("automation") ||
+      name.includes("sld") ||
+      name.includes("load list") ||
+      name.includes("cable tray") ||
+      name.includes("panel")
+    ){
+      t.dept="Electrical Team";
+    }
+
   });
-  el.innerHTML=rows;
+});
+el.innerHTML=rows;
 }
 
 function renderDepartmentDashboard(){
