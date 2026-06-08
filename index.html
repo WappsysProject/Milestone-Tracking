@@ -821,6 +821,9 @@ function getTechnicalDepartment(technicalTask){
   const value = String(technicalTask || "").trim();
   return value ? `Technical Team - ${value}` : "Technical Team";
 }
+function departmentLabel(t){
+  return t.dept === "Technical Team" ? getTechnicalDepartment(t.technicalTask) : t.dept;
+}
 
 function renderProject(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
@@ -831,16 +834,23 @@ function renderProject(){
   ].map(x=>`<div class="kpi"><div class="lbl">${x[0]}</div><div style="font-weight:800;margin-top:5px">${esc(x[1]||"-")}</div></div>`).join("");
   const s=stats(p); p.overallStatus=s.completion===100?"Done":(s.progress>0||s.done>0?"In Progress":"To Do");
   document.getElementById("pCompletion").textContent=s.completion+"%"; document.getElementById("pTodo").textContent=s.todo; document.getElementById("pProgress").textContent=s.progress; document.getElementById("pDone").textContent=s.done;
-  document.getElementById("filterDept").innerHTML='<option value="">All Departments</option>'+DEPARTMENTS.map(d=>`<option>${d}</option>`).join("");
-  const fd=document.getElementById("filterDept").value, fs=document.getElementById("filterStatus").value, ft=(document.getElementById("filterText").value||"").toLowerCase();
-  let tasks=p.tasks.filter(t=>(!fd||t.dept===fd)&&(!fs||t.status===fs)&&(!ft||(t.task+t.stage+t.sub+t.owner).toLowerCase().includes(ft)));
+  const filterDeptEl = document.getElementById("filterDept");
+  const selectedDept = filterDeptEl.value || "";
+  const deptOptions = [...new Set([...DEPARTMENTS, ...p.tasks.map(t=>departmentLabel(t)).filter(Boolean)])];
+  filterDeptEl.innerHTML = '<option value="">All Departments</option>' + deptOptions.map(d=>`<option value="${escAttr(d)}" ${selectedDept===d?"selected":""}>${esc(d)}</option>`).join("");
+  const fd=filterDeptEl.value, fs=document.getElementById("filterStatus").value, ft=(document.getElementById("filterText").value||"").toLowerCase();
+  let tasks=p.tasks.filter(t=>{
+    const dLabel = departmentLabel(t);
+    const searchBlob = (t.task+t.stage+t.sub+t.owner+dLabel+(t.technicalTask||"")).toLowerCase();
+    return (!fd || t.dept===fd || dLabel===fd) && (!fs || t.status===fs) && (!ft || searchBlob.includes(ft));
+  });
   let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Technical Task</th><th>Initial Planning Date</th><th>Actual Date</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
   let lastStage="", lastSub="";
   tasks.forEach(t=>{
     if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="27">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
     if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="27">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
-      <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(t.dept==="Technical Team" ? getTechnicalDepartment(t.technicalTask) : t.dept)}</td><td>${esc(t.task)}</td><td>${esc(t.technicalTask||"-")}</td>
+      <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td><td>${esc(t.technicalTask||"-")}</td>
       <td><input class="inline-input" type="date" value="${escAttr(t.initialPlanningDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
       <td><input class="inline-input" type="date" value="${escAttr(t.actualDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualDate',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.planning||"")}" onchange="updateTaskField('${p.id}','${t.id}','planning',this.value)"></td>
