@@ -816,6 +816,12 @@ function renderMyTasksDashboard(owner){
 }
 
 function openProject(id){ currentProjectId=id; showProjectView(); }
+
+function getTechnicalDepartment(technicalTask){
+  const value = String(technicalTask || "").trim();
+  return value ? `Technical Team - ${value}` : "Technical Team";
+}
+
 function renderProject(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
   document.getElementById("projectTitle").textContent=p.name || "Project";
@@ -831,8 +837,8 @@ function renderProject(){
   let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Technical Task</th><th>Initial Planning Date</th><th>Actual Date</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
   let lastStage="", lastSub="";
   tasks.forEach(t=>{
-    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="12">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
-    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="12">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
+    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="27">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
+    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="27">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
       <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(t.dept==="Technical Team" ? getTechnicalDepartment(t.technicalTask) : t.dept)}</td><td>${esc(t.task)}</td><td>${esc(t.technicalTask||"-")}</td>
       <td><input class="inline-input" type="date" value="${escAttr(t.initialPlanningDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
