@@ -467,16 +467,16 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Order scrutiny and get the final order"},
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Ask client for BG format"},
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Allotment of job code"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Handover from sales and contracts to projects", technicalTask:"Proposal"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Approved costing sheet"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Scope of project discussion with sales, contract and project team"},
+  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Handover from sales and contracts to projects", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Approved Costing Sheet", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Scope of project discussion with sales and contract along with project team", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Purchase Team", task:"Material cost checking during approval"},
   {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Projects Team", task:"Scope of project discussion with sales and contract"},
 
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Finalization of obligations / scope on TrueCounsel"},
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"BG / insurance coordination and other formalities for claiming advance"},
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Initial financial closure"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Technical Team", task:"Fill data gaps and brief all technical teams and project team", technicalTask:"Process"},
+  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Technical Team", task:"Fill Data Gaps and brief to all technical (Process, Detail Engineering & E&I team) & Project team", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"Initial RMC cost"},
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First delivery feedback"},
   {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First review of makes"},
@@ -487,7 +487,25 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Appoint project manager from HO team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Macro billing plan"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"TrueCounsel review for complete obligations"},
-  ...["Scheme & design submission","Design calculations","TDS preparation after cost comparison of various makes","P&ID","Plan & section","Client approval","Control philosophy","Indent 1","GFC and structural design / fabrication drawing","Client scope finalisation with quality control","GA and SLD with load list","Panel foundation","Piping layout","Cable tray layout","Indents 2, 4, 5 and 3","Automation logic","Note for transition team","Critical points and quality control measures for drawings and material"].map(t=>({stage:"Planning Stage",sub:"Engineering Closure",dept:"Technical Team",task:t})),
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Scheme & Design Submission", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Design Calculations", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"TDS Preparation after cost comparison of various make", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"P&ID", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Control Philosophy", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 1", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Details Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client scope finalisation with Quality control", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GA & SLD with Load List", technicalTask:"Electrical Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval - Panel Foundation", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Panel Foundation", technicalTask:"Electrical Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Cable Tray Layout", technicalTask:"Electrical Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents (2,4,5 & 3)", technicalTask:"Indent 2,4,5 Details Eng, Indent 3A&B Electrical"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Automation Logic", technicalTask:"Electrical Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Note for Transition Team", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Indent-wise budget review with design team to finalise and optimise indents"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Tank procurement decision based on key stakeholder inputs"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Critical technical/site inputs and feedback before final budget and vendor visit"},
@@ -498,17 +516,28 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Understand engineering drawings and critical quality control points"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Client scope finalisation with quality control and technical team"},
 
-  ...["Final Financial Closure","Ordering Go Ahead & Site Mobilization Preparation","Material Dispatch"].flatMap(sub => [
-    {stage:"Planning Stage", sub, dept:"Contracts & Commercial", task: sub==="Final Financial Closure" ? "Final budget and schedule signed off" : sub==="Ordering Go Ahead & Site Mobilization Preparation" ? "Oversee site mobilisation preparation and ensure client cashflow is available" : "Check E-way bill, RA bill and related documents as per site requirement"},
-    {stage:"Planning Stage", sub, dept:"Technical Team", task: sub==="Final Financial Closure" ? "Micro billing schedule with short/increase/decrease of quantity and extra item possibility" : sub==="Ordering Go Ahead & Site Mobilization Preparation" ? "Final TDS / inputs" : "Oversee material packing and dispatch"},
-    {stage:"Planning Stage", sub, dept:"Purchase Team", task: sub==="Final Financial Closure" ? "Procurement plan, logistics plan and ordering long delivery items" : sub==="Ordering Go Ahead & Site Mobilization Preparation" ? "Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan" : "TCs, challans, vendor coordination and material dispatch tracking"},
-    {stage:"Planning Stage", sub, dept:"Projects Team", task: sub==="Final Financial Closure" ? "Site expense budget, contractor budget, procurement/logistics approval and project tracking" : sub==="Ordering Go Ahead & Site Mobilization Preparation" ? "Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation" : "Verify site mobilisation file, budget, MIR documents, material receipt and security"}
-  ]),
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Final budget and schedule signed off"},
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement plan, logistics plan and ordering long delivery items"},
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Projects Team", task:"Site expense budget, contractor budget, procurement/logistics approval and project tracking"},
+
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Contracts & Commercial", task:"Oversee site mobilisation preparation and ensure client cashflow is available"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Final TDS / Inputs", technicalTask:"Process Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation"},
+
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Contracts & Commercial", task:"Check E-way bill, RA bill and related documents as per site requirement"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"TCs, challans, vendor coordination and material dispatch tracking"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Projects Team", task:"Verify site mobilisation file, budget, MIR documents, material receipt and security"},
 
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Contracts & Commercial", task:"Review site expense budget and closure plan"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check site team qualification and provide critical inputs", technicalTask:"Detail Eng"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check panel foundation", technicalTask:"Electrical + Detail Eng"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check any deviation with TDS related to E&I", technicalTask:"Electrical"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Any deviation with TDS related to E&I", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Purchase Team", task:"Review pending material/order and logistics with projects"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Final check of client work, status and snags"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Gate pass and billing document approvals"},
@@ -520,35 +549,45 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget and schedule control"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Client feedback"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing and collection"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution go-ahead", technicalTask:"Detail Eng"},
+  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Eng Team"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Purchase Team", task:"Share vendor visit details and supply material for indents"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Execution start"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Set quality control procedures and welding list"},
 
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site visit", technicalTask:"Detail Eng"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Eng"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation only after virtual completion certification", technicalTask:"Details Eng + Electrical Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Details Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Completion certification from the transition team", technicalTask:"Project Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Vendor visit list and coordination"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Supply material of indent 6"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Projects Team", task:"De-snagging, transition team visit, indent 7/8, optional QC visit and demobilisation control"},
 
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Contracts & Commercial", task:"Electrical budget if any deviation"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work, electrical progress and panel as per approved TDS", technicalTask:"Electrical"},
+  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Measuring of electrical progress", technicalTask:"Electrical Team"},
+  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Panel Started as per approved TDS", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Purchase Team", task:"Any pending items for indent 3"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Projects Team", task:"De-snagging of mechanical work"},
 
-  {stage:"Closure Stage", sub:"Desnagging, Testing & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing & Virtual Completion", dept:"Technical Team", task:"Indent 7-8, checklist approval dry/wet run, electrical checklist", technicalTask:"Electrical + Detail Eng + Process"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing & Virtual Completion", dept:"Purchase Team", task:"Provide vendor support/manuals if required and indent 7-8"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing & Virtual Completion", dept:"Projects Team", task:"Transition team snag list, indent 7-8, dry/wet run, testing & commissioning and HOTO document"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Checklist Approval (Dry/Wet Run)", technicalTask:"Process Team"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Electrical checklist (Continuity, rotation, Ampere)", technicalTask:"Electrical Team"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Purchase Team", task:"Provide vendor support/manuals if required and indent 7-8"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Projects Team", task:"Transition team snag list, indent 7-8, dry/wet run, testing & commissioning and HOTO document"},
 
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking / Commissioning & Handing over", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking / Commissioning & Handing over", dept:"Technical Team", task:"Monitor new technology/equipment performance and involve services post de-snagging", technicalTask:"Process"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking / Commissioning & Handing over", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking / Commissioning & Handing over", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
+
+  {stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"For new technology or new equipment, performance shall be closely monitored, and feedback shall be obtained from the operations team. Site visits may be conducted if required.", technicalTask:"Process Team"},
+  {stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"Full Involvement of Services post de-snagging", technicalTask:"Process Team"},
 
   {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Contracts & Commercial", task:"Customer feedback, financial reconciliation, project closure, billing and collections"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Technical Team", task:"Final technical support", technicalTask:"Process"},
+  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Technical Team", task:"Final Technical Support", technicalTask:"Process Team"},
   {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Purchase Team", task:"Leftover material list from site"},
   {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Projects Team", task:"Completion checklist and final payment reconciliation"},
   {stage:"DLP Period", sub:"RBG / DLP Period", dept:"Contracts & Commercial", task:"Submission of RBG as per defined DLP period"},
@@ -606,6 +645,93 @@ function normalizeAllDates(){
     (p.tasks||[]).forEach(t=>normalizeDateFields(t));
   });
 }
+
+function canonicalTaskText(value){
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g,"and")
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+const TECHNICAL_TASK_ASSIGNMENTS = {
+  "handover from sales and contracts to projects": "Process Team",
+  "approved costing sheet": "Process Team",
+  "scope of project discussion with sales contract and project team": "Process Team",
+  "scope of project discussion with sales and contract along with project team": "Process Team",
+  "fill data gaps and brief all technical teams and project team": "Process Team",
+  "fill data gaps and brief to all technical process detail engineering e and i team and project team": "Process Team",
+  "scheme and design submission": "Process Team",
+  "design calculations": "Process Team",
+  "tds preparation after cost comparison of various makes": "Process Team",
+  "tds preparation after cost comparison of various make": "Process Team",
+  "p and id": "Process Team",
+  "plan and section": "Detail Eng Team",
+  "client approval": "Process Team",
+  "control philosophy": "Process Team",
+  "indent 1": "Process Team",
+  "gfc and structural design fabrication drawing": "Details Eng Team",
+  "client scope finalisation with quality control": "Process Team",
+  "ga and sld with load list": "Electrical Team",
+  "client approval panel foundation": "Process Team",
+  "panel foundation": "Electrical Team",
+  "piping layout": "Detail Eng Team",
+  "cable tray layout": "Electrical Team",
+  "indents 2 4 5 and 3": "Indent 2,4,5 Details Eng, Indent 3A&B Electrical",
+  "automation logic": "Electrical Team",
+  "note for transition team": "Process Team",
+  "critical points and quality control measures drawings and material": "Detail Eng Team",
+  "micro billing schedule with short increase decrease of qty extra item possibility": "Detail Eng Team",
+  "micro billing schedule with short increase and decrease of qty extra item possibility": "Detail Eng Team",
+  "final tds inputs": "Process Team",
+  "site mobilization file to be handed over to projects close loop with transition team too": "Detail Eng Team",
+  "quality control of client work review": "Detail Eng Team",
+  "over see how material is packed and dispatch": "Detail Eng Team",
+  "oversee material packing and dispatch": "Detail Eng Team",
+  "quality control": "Detail Eng Team",
+  "check the qualification of site team critical inputs should be provided": "Detail Eng Team",
+  "check site team qualification and provide critical inputs": "Detail Eng Team",
+  "panel foundation need to check": "Detail Eng Team",
+  "check panel foundation": "Detail Eng Team",
+  "any deviation with tds related to e and i": "Electrical Team",
+  "check any deviation with tds related to e and i": "Electrical Team",
+  "execution go ahead": "Detail Eng Team",
+  "site visit": "Detail Eng Team",
+  "check indent 6 and approve": "Detail Eng Team",
+  "contractor demobilisation should be strictly after virtual completion certification": "Details Eng Team",
+  "contractor demobilisation only after virtual completion certification": "Details Eng Team",
+  "completion certification from the transition team": "Project Team",
+  "checking of mechanical work": "Detail Eng Team",
+  "checking of mechanical work electrical progress and panel as per approved tds": "Detail Eng Team",
+  "measuring of electrical progress": "Electrical Team",
+  "panel started as per approved tds": "Electrical Team",
+  "indent 7 8": "Detail Eng Team",
+  "checklist approval dry wet run": "Process Team",
+  "electrical checklist continuity rotation ampere": "Electrical Team",
+  "indent 7 8 checklist approval dry wet run electrical checklist": "Process Team",
+  "final shade of piping paint tank filter": "Detail Eng Team",
+  "paint dft should be mentioned in document": "Detail Eng Team",
+  "as built submission and pfd dashboard provided to site team": "Detail Eng Team",
+  "monitor new technology equipment performance and involve services post de snagging": "Process Team",
+  "for new technology or new equipment performance shall be closely monitored and feedback shall be obtained from the operations team site visits may be conducted if required": "Process Team",
+  "full involvement of services post de snagging": "Process Team",
+  "final technical support": "Process Team"
+};
+
+function applyMinorTaskUpdates(){
+  (db.projects || []).forEach(p => {
+    (p.tasks || []).forEach(t => {
+      if(!t || t.dept !== "Technical Team") return;
+      const key = canonicalTaskText(t.task);
+      if(TECHNICAL_TASK_ASSIGNMENTS[key]){
+        t.technicalTask = TECHNICAL_TASK_ASSIGNMENTS[key];
+      }
+    });
+  });
+}
+
 function save(){
   if(firebaseReady && firebaseDBRef){
     firebaseDBRef.set(db)
@@ -718,7 +844,7 @@ function login(){
   }
 }
 
-function renderAll(){ ensureUsers(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
+function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
 function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
@@ -965,13 +1091,13 @@ function renderProject(){
     const searchBlob = (t.task+t.stage+t.sub+t.owner+dLabel+(t.technicalTask||"")).toLowerCase();
     return (!fd || t.dept===fd || dLabel===fd) && (!fs || t.status===fs) && (!ft || searchBlob.includes(ft));
   });
-  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Technical Task</th><th>Initial Planning Date</th><th>Actual Date</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
+  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Initial Planning Date</th><th>Actual Date</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
   let lastStage="", lastSub="";
   tasks.forEach(t=>{
-    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="27">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
-    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="27">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
+    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="26">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
+    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="26">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
-      <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td><td>${esc(t.technicalTask||"-")}</td>
+      <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td>
       <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.initialPlanningDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
       <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.actualDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualDate',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.planning||"")}" onchange="updateTaskField('${p.id}','${t.id}','planning',this.value)"></td>
