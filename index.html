@@ -547,10 +547,60 @@ const WORKFLOW_TEMPLATE = [
 
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
 function today(){ return new Date().toISOString().slice(0,10); }
+
+function parseDateFlexible(dateStr){
+  if(!dateStr) return null;
+  let s=String(dateStr).trim();
+  if(!s) return null;
+
+  // Already safe HTML date format: YYYY-MM-DD
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+
+  // Indian/common format: DD/MM/YYYY or DD-MM-YYYY
+  m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if(m){
+    const dd=Number(m[1]), mm=Number(m[2]), yy=Number(m[3]);
+    return new Date(yy, mm-1, dd);
+  }
+
+  // Format like 15-Jun-2026 or 15 Jun 2026
+  const d=new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function normalizeDateForInput(dateStr){
+  const d=parseDateFlexible(dateStr);
+  if(!d) return "";
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatDateDisplay(dateStr){
+  const d=parseDateFlexible(dateStr);
+  if(!d) return dateStr ? String(dateStr) : "";
+  return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}).replace(/ /g,'-');
+}
+
+function normalizeDateFields(obj){
+  ["dueDate","initialPlanningDate","actualDate","targetDate","startDate"].forEach(k=>{
+    if(obj && obj[k]) obj[k]=normalizeDateForInput(obj[k]) || obj[k];
+  });
+}
+
+function normalizeAllDates(){
+  (db.projects||[]).forEach(p=>{
+    normalizeDateFields(p);
+    (p.tasks||[]).forEach(t=>normalizeDateFields(t));
+  });
+}
 function save(){
   if(firebaseReady && firebaseDBRef){
     firebaseDBRef.set(db)
       .then(()=> {
+        normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
         renderAll();
       })
@@ -587,6 +637,7 @@ function load(){
         if(!Array.isArray(db.projects)) db.projects = [];
         if(!Array.isArray(db.activity)) db.activity = [];
         ensureUsers();
+        normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
         renderAll();
         const mode = document.getElementById("storageMode");
@@ -667,9 +718,9 @@ function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView"
 function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
 function daysFromToday(dateStr){
-  if(!dateStr) return null;
-  const d = new Date(dateStr + "T00:00:00");
-  const t = new Date(today() + "T00:00:00");
+  const d = parseDateFlexible(dateStr);
+  if(!d) return null;
+  const t = parseDateFlexible(today());
   return Math.round((d - t) / (1000*60*60*24));
 }
 function isOverdueTask(t){ return t.dueDate && t.status !== "Done" && daysFromToday(t.dueDate) < 0; }
@@ -749,7 +800,7 @@ function renderDashboard(){
       <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
       <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
       <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
-      <div class="summary-line"><b>Next Due</b><span>${next ? esc(next.dueDate||"-") : "-"}</span></div>
+      <div class="summary-line"><b>Next Due</b><span>${next ? esc(formatDateDisplay(next.dueDate)||"-") : "-"}</span></div>
       <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
       <div class="bar"><span style="width:${s.completion}%"></span></div>
       <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
@@ -786,7 +837,7 @@ function renderCurrentStageTable(projects){
       <td>${esc(stageParts[1]||"-")}</td>
       <td>${next ? esc(next.task) : "All tasks completed"}</td>
       <td>${next ? esc(next.owner||"-") : "-"}</td>
-      <td>${next ? esc(next.dueDate||"-") : "-"}</td>
+      <td>${next ? esc(formatDateDisplay(next.dueDate)||"-") : "-"}</td>
     </tr>`;
   });
   el.innerHTML=rows;
@@ -890,7 +941,7 @@ function renderProject(){
   document.getElementById("projectTitle").textContent=p.name || "Project";
   document.getElementById("projectSummary").innerHTML = [
     ["Project Name",p.name],["Job Code",p.jobCode],["Stage",getCurrentStage(p).split(" / ")[0]],["Sub Stage",getCurrentStage(p).split(" / ")[1]||"-"],
-    ["Due Date",p.targetDate],["Status",p.overallStatus],["RMC Budget",p.rmcBudget],["Freight Value",p.freightValue],["Site Expenses",p.siteExpenses],["Contractor Budget",p.contractorBudget],["Technology & Capacity",p.technology],["Location",p.location]
+    ["Due Date",formatDateDisplay(p.targetDate)],["Status",p.overallStatus],["RMC Budget",p.rmcBudget],["Freight Value",p.freightValue],["Site Expenses",p.siteExpenses],["Contractor Budget",p.contractorBudget],["Technology & Capacity",p.technology],["Location",p.location]
   ].map(x=>`<div class="kpi"><div class="lbl">${x[0]}</div><div style="font-weight:800;margin-top:5px">${esc(x[1]||"-")}</div></div>`).join("");
   const s=stats(p); p.overallStatus=s.completion===100?"Done":(s.progress>0||s.done>0?"In Progress":"To Do");
   document.getElementById("pCompletion").textContent=s.completion+"%"; document.getElementById("pTodo").textContent=s.todo; document.getElementById("pProgress").textContent=s.progress; document.getElementById("pDone").textContent=s.done;
@@ -911,8 +962,8 @@ function renderProject(){
     if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="27">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
       <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td><td>${esc(t.technicalTask||"-")}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(t.initialPlanningDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(t.actualDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualDate',this.value)"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.initialPlanningDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.actualDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualDate',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.planning||"")}" onchange="updateTaskField('${p.id}','${t.id}','planning',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.visitorPerson||"")}" onchange="updateTaskField('${p.id}','${t.id}','visitorPerson',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.siteReport||"")}" onchange="updateTaskField('${p.id}','${t.id}','siteReport',this.value)"></td>
@@ -926,7 +977,7 @@ function renderProject(){
       <td><input class="inline-input" value="${escAttr(t.actualBilling||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualBilling',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.collection||"")}" onchange="updateTaskField('${p.id}','${t.id}','collection',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(t.dueDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.dueDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)"></td>
       <td><select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
       <td>${esc(t.remarks||"")}</td><td>${esc(t.delayReason||"")}</td><td>${esc(t.lastUpdated||"")}</td>
       <td><button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button></td>
@@ -944,7 +995,7 @@ function renderProject(){
         <label>Owner</label>
         <input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())">
         <label>Due Date</label>
-        <input class="inline-input" type="date" value="${escAttr(t.dueDate||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)">
+        <input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.dueDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)">
         <label>Status</label>
         <select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select>
         <div class="row" style="margin-top:8px">
@@ -970,7 +1021,7 @@ function openProjectForm(id){
   <div class="row" style="margin-top:16px"><button class="primary" onclick="saveProject('${id||""}')">Save Project</button><button onclick="closeModal()">Cancel</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
 }
-function field(label,id,val="",type="text"){ return `<div><label>${label}</label><input id="f_${id}" type="${type}" value="${escAttr(val||"")}"></div>`; }
+function field(label,id,val="",type="text"){ const safeVal = type==="date" ? normalizeDateForInput(val) : (val||""); return `<div><label>${label}</label><input id="f_${id}" type="${type}" value="${escAttr(safeVal)}"></div>`; }
 function defaultOwnerForDept(p, dept){
   return dept==="Contracts & Commercial" ? (p.ownerContracts||"") :
          dept==="Technical Team" ? (p.ownerTechnical||"") :
@@ -1001,6 +1052,7 @@ function addGlobalActivity(project, task, action, details){
 function updateTaskField(projectId, taskId, field, value){
   const p=db.projects.find(x=>x.id===projectId); if(!p) return;
   const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
+  if(["dueDate","initialPlanningDate","actualDate","targetDate","startDate"].includes(field)) value = normalizeDateForInput(value);
   if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
   if((field==="owner" || field==="dueDate") && !(currentUserRole==="Admin" || currentUserRole==="PM")){ alert("Only Admin/PM can change owner or due date."); renderProject(); return; }
   const oldValue=t[field] || "";
@@ -1162,8 +1214,8 @@ function getMISRows(){
         task:t.task||"",
         owner:t.owner||"",
         taskStatus:t.status||"",
-        initialPlanningDate:t.initialPlanningDate||"",
-        actualDate:t.actualDate||"",
+        initialPlanningDate:formatDateDisplay(t.initialPlanningDate)||"",
+        actualDate:formatDateDisplay(t.actualDate)||"",
         siteMom,
         quality,
         correspondence,
