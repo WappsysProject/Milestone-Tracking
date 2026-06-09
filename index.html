@@ -117,6 +117,7 @@
     <div class="tabs">
       <div class="tab active" id="dashboardTab" onclick="showDashboard()">All Projects Dashboard</div>
       <div class="tab" id="projectTab" onclick="showProjectView()">Project Tracker</div>
+      <div class="tab" id="misTab" onclick="showMIS()">MIS Summary</div>
       <div class="tab" onclick="showSetup()">Setup / Backup</div>
     </div>
 
@@ -235,6 +236,58 @@
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
+      </div>
+    </section>
+
+
+    <section id="misView" class="hidden">
+      <div class="card">
+        <div class="toolbar">
+          <div>
+            <h2 style="margin:0">MIS / Management Summary</h2>
+            <p class="muted">Read-only summary from all project/task data. Export does not modify Firebase data.</p>
+          </div>
+          <div class="row">
+            <button class="blue" onclick="exportMISCSV()">Export MIS CSV</button>
+            <button onclick="renderMIS()">Refresh Summary</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-4">
+        <div class="kpi"><div class="lbl">Total MIS Rows</div><div class="num" id="misRowsCount">0</div></div>
+        <div class="kpi"><div class="lbl">MOM / Site Report Pending</div><div class="num" id="misMomPending">0</div></div>
+        <div class="kpi"><div class="lbl">Quality Check Pending</div><div class="num" id="misQualityPending">0</div></div>
+        <div class="kpi"><div class="lbl">Correspondence Pending</div><div class="num" id="misCorrespondencePending">0</div></div>
+        <div class="kpi"><div class="lbl">Expense Pending</div><div class="num" id="misExpensePending">0</div></div>
+        <div class="kpi"><div class="lbl">Budget Deviation</div><div class="num" id="misBudgetDeviation">0</div></div>
+        <div class="kpi"><div class="lbl">Billing Pending</div><div class="num" id="misBillingPending">0</div></div>
+        <div class="kpi"><div class="lbl">Collection Pending</div><div class="num" id="misCollectionPending">0</div></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <h3 style="margin:0">All Projects MIS Data</h3>
+          <div class="row">
+            <input id="misSearch" style="width:260px" placeholder="Search project/task/owner..." oninput="renderMIS()" />
+            <select id="misDeptFilter" onchange="renderMIS()">
+              <option value="">All Departments</option>
+              <option>Contracts & Commercial</option>
+              <option>Technical Team</option>
+              <option>Purchase Team</option>
+              <option>Projects Team</option>
+            </select>
+            <select id="misStatusFilter" onchange="renderMIS()">
+              <option value="">All Status</option>
+              <option>To Do</option>
+              <option>In Progress</option>
+              <option>Done</option>
+            </select>
+          </div>
+        </div>
+        <div style="overflow:auto;max-height:72vh;margin-top:12px">
+          <table id="misTable"></table>
+        </div>
       </div>
     </section>
 
@@ -600,11 +653,12 @@ function login(){
   }
 }
 
-function renderAll(){ ensureUsers(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); }
+function renderAll(){ ensureUsers(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
+function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); }
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
-function hideAll(){ ["dashboardView","projectView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
+function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
 function daysFromToday(dateStr){
   if(!dateStr) return null;
@@ -1060,6 +1114,97 @@ function escAttr(s){ return esc(s).replace(/"/g,"&quot;"); }
 function csv(rows){
   return rows.map(r=>r.map(x=>`"${String(x??"").replace(/"/g,'""')}"`).join(",")).join("\n");
 }
+
+function asText(v){ return String(v ?? "").trim(); }
+function hasValue(v){ return asText(v) !== ""; }
+function toNumber(v){
+  const n = Number(String(v ?? "").replace(/[^0-9.-]/g,""));
+  return isNaN(n) ? null : n;
+}
+function statusFromValue(v){ return hasValue(v) ? "Updated" : "Pending"; }
+function combinedStatus(values){ return values.some(hasValue) ? "Updated" : "Pending"; }
+function budgetDeviationText(t){
+  const budget = toNumber(t.budget);
+  const expense = toNumber(t.expensesIncurred);
+  if(budget !== null && expense !== null){
+    const diff = expense - budget;
+    if(diff === 0) return "No Deviation";
+    return diff > 0 ? `Over Budget by ${diff}` : `Under Budget by ${Math.abs(diff)}`;
+  }
+  if(hasValue(t.budget) || hasValue(t.expensesIncurred)) return "Check Values";
+  return "Pending";
+}
+function getMISRows(){
+  const rows=[];
+  (db.projects||[]).forEach(p=>{
+    (p.tasks||[]).forEach(t=>{
+      const siteMom = combinedStatus([t.siteReport,t.visitorPerson,t.planning]);
+      const quality = combinedStatus([t.qualityCheckReport,t.checkPoints,t.checkingPerson]);
+      const correspondence = statusFromValue(t.monthlyCorrespondence);
+      const expense = hasValue(t.expensesIncurred) ? t.expensesIncurred : "Pending";
+      const budgetDeviation = budgetDeviationText(t);
+      const billing = combinedStatus([t.actualBilling,t.plannedBilling]);
+      const collection = statusFromValue(t.collection);
+      const feedback = statusFromValue(t.customerFeedback || p.customerFeedback || t.clientFeedback || p.clientFeedback);
+      rows.push({
+        projectName:p.name||"",
+        jobCode:p.jobCode||"",
+        client:p.client||"",
+        stage:t.stage||"",
+        sub:t.sub||"",
+        department:t.dept||"",
+        task:t.task||"",
+        owner:t.owner||"",
+        taskStatus:t.status||"",
+        initialPlanningDate:t.initialPlanningDate||"",
+        actualDate:t.actualDate||"",
+        siteMom,
+        quality,
+        correspondence,
+        expense,
+        budget:t.budget||"",
+        budgetDeviation,
+        billingStatus: hasValue(t.actualBilling) ? `Actual: ${t.actualBilling}` : (hasValue(t.plannedBilling) ? `Planned: ${t.plannedBilling}` : "Pending"),
+        collectionStatus: hasValue(t.collection) ? t.collection : "Pending",
+        customerFeedback: hasValue(t.customerFeedback || p.customerFeedback || t.clientFeedback || p.clientFeedback) ? (t.customerFeedback || p.customerFeedback || t.clientFeedback || p.clientFeedback) : "Pending"
+      });
+    });
+  });
+  return rows;
+}
+function renderMIS(){
+  const table=document.getElementById("misTable"); if(!table) return;
+  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
+  const dept=document.getElementById("misDeptFilter")?.value||"";
+  const st=document.getElementById("misStatusFilter")?.value||"";
+  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
+  if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
+  setText("misRowsCount", rows.length);
+  setText("misMomPending", rows.filter(r=>r.siteMom==="Pending").length);
+  setText("misQualityPending", rows.filter(r=>r.quality==="Pending").length);
+  setText("misCorrespondencePending", rows.filter(r=>r.correspondence==="Pending").length);
+  setText("misExpensePending", rows.filter(r=>r.expense==="Pending").length);
+  setText("misBudgetDeviation", rows.filter(r=>r.budgetDeviation && !["Pending","No Deviation"].includes(r.budgetDeviation)).length);
+  setText("misBillingPending", rows.filter(r=>r.billingStatus==="Pending").length);
+  setText("misCollectionPending", rows.filter(r=>r.collectionStatus==="Pending").length);
+  let html=`<tr><th>Project</th><th>Job Code</th><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Owner</th><th>Initial Planning Date</th><th>Actual Date</th><th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th></tr>`;
+  html += rows.map(r=>`<tr>
+    <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.stage)}</td><td>${esc(r.sub)}</td><td>${esc(r.department)}</td><td>${esc(r.task)}</td><td>${esc(r.owner)}</td>
+    <td>${esc(r.initialPlanningDate)}</td><td>${esc(r.actualDate)}</td><td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
+  </tr>`).join("");
+  table.innerHTML=html;
+}
+function exportMISCSV(){
+  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
+  const dept=document.getElementById("misDeptFilter")?.value||"";
+  const st=document.getElementById("misStatusFilter")?.value||"";
+  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
+  if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
+  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Initial Planning Date","Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
+  rows.forEach(r=>csvRows.push([r.projectName,r.jobCode,r.client,r.stage,r.sub,r.department,r.task,r.owner,r.taskStatus,r.initialPlanningDate,r.actualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback]));
+  downloadFile("all-projects-mis-summary.csv", csv(csvRows), "text/csv");
+}
+
 function exportProjectCSV(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
   const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Department","Task","Owner","Due Date","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,t.dept,t.task,t.owner,t.dueDate,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
