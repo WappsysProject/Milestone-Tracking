@@ -40,7 +40,7 @@
     .tab.active{background:var(--accent);color:white}
     table{width:100%;border-collapse:collapse;background:white}
     th,td{border:1px solid var(--border);padding:8px;vertical-align:top;font-size:12px}
-    th{background:#eaf2f8;text-align:left;position:sticky;top:76px;z-index:5}
+    th{background:#eaf2f8;text-align:left;position:static;z-index:1}
     tr.stage-row td{background:var(--stage);font-weight:800;color:#111}
     tr.substage-row td{background:#f8fafc;font-weight:800}
     .status{font-weight:800;border-radius:999px;padding:5px 8px;display:inline-block;font-size:11px}
@@ -91,6 +91,10 @@
     .role-badge{display:inline-block;border-radius:999px;background:#e0f2fe;color:#075985;padding:4px 9px;font-size:11px;font-weight:800}
     .lock-note{background:#f8fafc;border:1px solid #cbd5e1;border-radius:10px;padding:10px;font-size:12px;color:#334155;margin-top:8px}
     .admin-panel{background:#f8fafc;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
+
+    .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
+    .table-scroll table{min-width:1200px}
+    .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
   </style>
 </head>
 <body>
@@ -656,7 +660,9 @@ function login(){
 function renderAll(){ ensureUsers(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
-function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); }
+function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
+  renderMISDashboard();
+}
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
 function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
@@ -1239,6 +1245,207 @@ function downloadFile(name, content, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
 }
 load();
+
+
+/* ===== PROJECT-WISE MIS SUMMARY OVERRIDE ===== */
+function taskHasValue(t, keys){
+  return keys.some(k => String(t[k] ?? "").trim() !== "");
+}
+function latestNonEmpty(tasks, keys){
+  for(const t of tasks){
+    for(const k of keys){
+      const v = String(t[k] ?? "").trim();
+      if(v) return v;
+    }
+  }
+  return "";
+}
+function countWithValue(tasks, keys){
+  return tasks.filter(t => taskHasValue(t, keys)).length;
+}
+function countMissingValue(tasks, keys){
+  return tasks.filter(t => !taskHasValue(t, keys)).length;
+}
+function countStatusLike(tasks, keys, positiveWords){
+  return tasks.filter(t => {
+    const joined = keys.map(k => String(t[k] ?? "").toLowerCase()).join(" ");
+    return positiveWords.some(w => joined.includes(w));
+  }).length;
+}
+function projectMISRow(p){
+  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+  const total = tasks.length || 0;
+  const done = tasks.filter(t=>t.status==="Done").length;
+  const overdue = tasks.filter(t=>typeof isOverdueTask==="function" ? isOverdueTask(t) : (t.dueDate && t.status!=="Done" && t.dueDate < today())).length;
+  const completion = total ? Math.round(done*100/total) : 0;
+
+  const initialPlanningCount = countWithValue(tasks, ["initialPlanningDate"]);
+  const actualDateCount = countWithValue(tasks, ["actualDate"]);
+  const siteReportCount = countWithValue(tasks, ["siteReport","momReport","siteVisitReport"]);
+  const qualityCheckCount = countWithValue(tasks, ["qualityCheckReport","checkPoints","checkingPerson"]);
+  const correspondenceCount = countWithValue(tasks, ["monthlyCorrespondence","correspondence"]);
+  const expenseCount = countWithValue(tasks, ["expensesIncurred","expense"]);
+  const budgetCount = countWithValue(tasks, ["budget"]);
+  const billingCount = countWithValue(tasks, ["actualBilling","plannedBilling","billingStatus"]);
+  const collectionCount = countWithValue(tasks, ["collection","collectionStatus"]);
+
+  const totalBudget = tasks.reduce((sum,t)=>sum + (parseFloat(String(t.budget||"").replace(/,/g,"")) || 0), 0);
+  const totalExpense = tasks.reduce((sum,t)=>sum + (parseFloat(String(t.expensesIncurred||t.expense||"").replace(/,/g,"")) || 0), 0);
+  const budgetDeviation = (totalBudget || totalExpense) ? (totalExpense - totalBudget) : "";
+
+  return {
+    projectName: p.name || "",
+    jobCode: p.jobCode || "",
+    client: p.client || "",
+    projectManager: p.manager || "",
+    status: p.overallStatus || "",
+    completion: completion + "%",
+    health: typeof stats==="function" ? stats(p).health : (overdue ? "Delayed" : "On Track"),
+    currentStage: typeof getCurrentStage==="function" ? getCurrentStage(p) : "",
+    totalTasks: total,
+    overdueTasks: overdue,
+    initialPlanningDate: initialPlanningCount ? `${initialPlanningCount}/${total} updated` : "Pending",
+    actualDate: actualDateCount ? `${actualDateCount}/${total} updated` : "Pending",
+    siteVisitsMomReportStatus: siteReportCount ? `${siteReportCount}/${total} updated` : "Pending",
+    qualityChecksStatus: qualityCheckCount ? `${qualityCheckCount}/${total} updated` : "Pending",
+    correspondence: correspondenceCount ? `${correspondenceCount}/${total} updated` : "Pending",
+    expense: expenseCount ? `${expenseCount}/${total} updated` : "Pending",
+    budgetDeviation: budgetDeviation === "" ? "Pending" : budgetDeviation,
+    billingStatus: billingCount ? `${billingCount}/${total} updated` : "Pending",
+    collectionStatus: collectionCount ? `${collectionCount}/${total} updated` : "Pending",
+    customerFeedback: latestNonEmpty(tasks, ["customerFeedback","clientFeedback","feedback"]) || "Pending"
+  };
+}
+function getMISProjectRows(){
+  return (db.projects || []).map(projectMISRow);
+}
+function renderMISDashboard(){
+  const container = document.getElementById("misView") || document.getElementById("misDashboard") || document.getElementById("misSummaryView");
+  if(!container) return;
+
+  const rows = getMISProjectRows();
+  const pending = (field) => rows.filter(r => String(r[field]||"").toLowerCase()==="pending").length;
+  const delayed = rows.filter(r => (parseInt(r.overdueTasks)||0)>0).length;
+
+  container.innerHTML = `
+    <div class="grid grid-4">
+      <div class="kpi"><div class="lbl">Total Projects</div><div class="num">${rows.length}</div></div>
+      <div class="kpi"><div class="lbl">Delayed Projects</div><div class="num">${delayed}</div></div>
+      <div class="kpi"><div class="lbl">MOM / Site Report Pending</div><div class="num">${pending("siteVisitsMomReportStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Quality Check Pending</div><div class="num">${pending("qualityChecksStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Correspondence Pending</div><div class="num">${pending("correspondence")}</div></div>
+      <div class="kpi"><div class="lbl">Expense Pending</div><div class="num">${pending("expense")}</div></div>
+      <div class="kpi"><div class="lbl">Billing Pending</div><div class="num">${pending("billingStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Collection Pending</div><div class="num">${pending("collectionStatus")}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <div>
+          <h2 style="margin:0">Project-wise MIS Summary</h2>
+          <p class="mis-note">One row per project. This summarizes all task updates without showing every task.</p>
+        </div>
+        <button class="blue" onclick="exportMISCSV()">Export Project-wise MIS CSV</button>
+      </div>
+      <div class="table-scroll" style="margin-top:12px">
+        <table>
+          <tr>
+            <th>Project Name</th>
+            <th>Job Code</th>
+            <th>Client</th>
+            <th>Project Manager</th>
+            <th>Status</th>
+            <th>Completion</th>
+            <th>Health</th>
+            <th>Current Stage</th>
+            <th>Overdue Tasks</th>
+            <th>Initial Planning Date</th>
+            <th>Actual Date</th>
+            <th>Site Visits / M.O.M Report Status</th>
+            <th>Quality Checks Status</th>
+            <th>Correspondence</th>
+            <th>Expense</th>
+            <th>Budget Deviation</th>
+            <th>Billing Status</th>
+            <th>Collection Status</th>
+            <th>Customer Feedback</th>
+          </tr>
+          ${rows.map(r=>`
+            <tr>
+              <td>${esc(r.projectName)}</td>
+              <td>${esc(r.jobCode)}</td>
+              <td>${esc(r.client)}</td>
+              <td>${esc(r.projectManager)}</td>
+              <td>${esc(r.status)}</td>
+              <td>${esc(r.completion)}</td>
+              <td>${esc(r.health)}</td>
+              <td>${esc(r.currentStage)}</td>
+              <td>${esc(r.overdueTasks)}</td>
+              <td>${esc(r.initialPlanningDate)}</td>
+              <td>${esc(r.actualDate)}</td>
+              <td>${esc(r.siteVisitsMomReportStatus)}</td>
+              <td>${esc(r.qualityChecksStatus)}</td>
+              <td>${esc(r.correspondence)}</td>
+              <td>${esc(r.expense)}</td>
+              <td>${esc(r.budgetDeviation)}</td>
+              <td>${esc(r.billingStatus)}</td>
+              <td>${esc(r.collectionStatus)}</td>
+              <td>${esc(r.customerFeedback)}</td>
+            </tr>
+          `).join("")}
+        </table>
+      </div>
+    </div>
+  `;
+}
+function exportMISCSV(){
+  const rows = getMISProjectRows();
+  const headers = [
+    "Project Name",
+    "Job Code",
+    "Client",
+    "Project Manager",
+    "Status",
+    "Completion",
+    "Health",
+    "Current Stage",
+    "Overdue Tasks",
+    "Initial planning date",
+    "Actual date",
+    "Site visits/ M.O.M Report status",
+    "Quality Checks status",
+    "Correspondence",
+    "Expense",
+    "Budget Deviation",
+    "Billing Status",
+    "Collection status",
+    "Customer feedback"
+  ];
+  const data = rows.map(r=>[
+    r.projectName,
+    r.jobCode,
+    r.client,
+    r.projectManager,
+    r.status,
+    r.completion,
+    r.health,
+    r.currentStage,
+    r.overdueTasks,
+    r.initialPlanningDate,
+    r.actualDate,
+    r.siteVisitsMomReportStatus,
+    r.qualityChecksStatus,
+    r.correspondence,
+    r.expense,
+    r.budgetDeviation,
+    r.billingStatus,
+    r.collectionStatus,
+    r.customerFeedback
+  ]);
+  downloadFile("project-wise-mis-summary.csv", csv([headers, ...data]), "text/csv");
+}
+/* ===== END PROJECT-WISE MIS SUMMARY OVERRIDE ===== */
+
 </script>
 
 </body>
