@@ -41,6 +41,16 @@
     table{width:100%;border-collapse:collapse;background:white}
     th,td{border:1px solid var(--border);padding:8px;vertical-align:top;font-size:12px}
     th{background:#eaf2f8;text-align:left;position:static;z-index:1}
+
+    /* Freeze table heading rows while scrolling large task/MIS tables */
+    #taskTable th,
+    #misTable th{
+      position:sticky;
+      top:0;
+      z-index:5;
+      background:#eaf2f8;
+      box-shadow:0 2px 4px rgba(15,23,42,.08);
+    }
     tr.stage-row td{background:var(--stage);font-weight:800;color:#111}
     tr.substage-row td{background:#f8fafc;font-weight:800}
     .status{font-weight:800;border-radius:999px;padding:5px 8px;display:inline-block;font-size:11px}
@@ -236,7 +246,7 @@
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
         </div>
-        <div style="overflow:auto;max-height:72vh;margin-top:12px">
+        <div class="table-scroll" style="overflow:auto;max-height:72vh;margin-top:12px">
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
@@ -289,7 +299,7 @@
             </select>
           </div>
         </div>
-        <div style="overflow:auto;max-height:72vh;margin-top:12px">
+        <div class="table-scroll" style="overflow:auto;max-height:72vh;margin-top:12px">
           <table id="misTable"></table>
         </div>
       </div>
