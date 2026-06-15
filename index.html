@@ -310,16 +310,11 @@
         <div class="note">
           This version is connected to Firebase Realtime Database and Firebase Authentication. Use Firebase Authentication Users for passwords, and use this tracker only for user roles, projects, tasks, alerts and reports.
         </div>
-        <h3>Firebase Config Placeholder</h3>
-        <div class="firebase-box">const firebaseConfig = {
-  apiKey: "PASTE_HERE",
-  authDomain: "PASTE_HERE",
-  databaseURL: "PASTE_HERE",
-  projectId: "PASTE_HERE",
-  storageBucket: "PASTE_HERE",
-  messagingSenderId: "PASTE_HERE",
-  appId: "PASTE_HERE"
-};</div>
+        <h3>Firebase Setup Status</h3>
+        <div class="firebase-box">Firebase configuration is already added in this HTML file.
+Do not paste PASTE_HERE values anywhere.
+Passwords are managed only in Firebase Authentication.
+Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
         <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
@@ -360,7 +355,8 @@ const firebaseConfig = {
   projectId: "wapp-project-tracking",
   storageBucket: "wapp-project-tracking.firebasestorage.app",
   messagingSenderId: "34102977368",
-  appId: "1:34102977368:web:c3b129a288f4747c9b7b2d"
+  appId: "1:34102977368:web:c3b129a288f4747c9b7b2d",
+  measurementId: "G-V27SQJ52MD"
 };
 
 let firebaseReady = false;
