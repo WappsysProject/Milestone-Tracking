@@ -116,9 +116,9 @@
 <div class="wrap">
   <section id="loginScreen" class="login card">
     <h2>Login</h2>
-    <p class="muted">Use assigned email/password. Default admin: <b>admin@wapp.com / admin123</b></p>
+    <p class="muted">Use Firebase Authentication email/password. Passwords are not stored in this HTML.</p>
     <label>Email</label>
-    <input id="userInput" type="email" placeholder="Example: mohit@company.com"/>
+    <input id="userInput" type="email" placeholder="Example: it@wappsys.com"/>
     <label>Password</label>
     <input id="passwordInput" type="password" placeholder="Enter password"/>
     <div style="margin-top:12px" class="row">
@@ -146,14 +146,13 @@
         </div>
         <div id="adminUserPanel" class="admin-panel hidden">
           <h3 style="margin-top:0">Admin: Add / Update User</h3>
-          <div class="grid grid-4">
-            <div><label>Email</label><input id="newUserEmail" placeholder="user@company.com"></div>
+          <div class="grid grid-3">
+            <div><label>Email</label><input id="newUserEmail" placeholder="user@wappsys.com"></div>
             <div><label>Name</label><input id="newUserName" placeholder="User name"></div>
-            <div><label>Password</label><input id="newUserPassword" placeholder="Password"></div>
             <div><label>Role</label><select id="newUserRole"><option>Admin</option><option>PM</option><option>Team</option><option>Viewer</option></select></div>
           </div>
-          <button class="primary" style="margin-top:10px" onclick="addOrUpdateUser()">Save User</button>
-          <div class="lock-note">Admin: everything. PM: project/task management. Team: assigned task updates. Viewer: read only.</div>
+          <button class="primary" style="margin-top:10px" onclick="addOrUpdateUser()">Save User Role</button>
+          <div class="lock-note">Create the user's email/password in Firebase Authentication first. This panel only stores name, role and active status. Admin: everything. PM: project/task management. Team: assigned task updates. Viewer: read only.</div>
         </div>
       </div>
 
@@ -309,7 +308,7 @@
       <div class="card">
         <h2>Free Hosting + Shared Data Setup</h2>
         <div class="note">
-          This version is connected to Firebase Realtime Database for shared team tracking. It includes role-based access control, in-app alerts, activity logs, and LocalStorage fallback if Firebase is unavailable.
+          This version is connected to Firebase Realtime Database and Firebase Authentication. Use Firebase Authentication Users for passwords, and use this tracker only for user roles, projects, tasks, alerts and reports.
         </div>
         <h3>Firebase Config Placeholder</h3>
         <div class="firebase-box">const firebaseConfig = {
@@ -341,10 +340,10 @@
 
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
 <script>
-const APP_PASSWORD = "admin123"; // Change before hosting.
 const STATUS = ["To Do","In Progress","Done"];
 const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","Projects Team"];
 let db = { projects: [] };
@@ -381,8 +380,21 @@ function emailToKey(email){
   return String(email || "").trim().toLowerCase().replace(/[.#$\/\[\]]/g, "_");
 }
 
+// These are roles for users who have already been created in Firebase Authentication.
+// Passwords must never be stored in this HTML or Realtime Database.
 const DEFAULT_USERS = {
-  [emailToKey("admin@wapp.com")]: {email:"admin@wapp.com", name:"Admin", password:"admin123", role:"Admin", active:true}
+  [emailToKey("it@wappsys.com")]: {
+    email: "it@wappsys.com",
+    name: "Sandeep",
+    role: "Admin",
+    active: true
+  },
+  [emailToKey("sachin.kumar@wappsys.com")]: {
+    email: "sachin.kumar@wappsys.com",
+    name: "Sachin Kumar",
+    role: "PM",
+    active: true
+  }
 };
 
 function normalizeUsers(){
@@ -396,7 +408,6 @@ function normalizeUsers(){
     normalized[safeKey] = {
       email,
       name: user.name || email,
-      password: user.password || "",
       role: user.role || "Viewer",
       active: user.active !== false,
       createdAt: user.createdAt || "",
@@ -407,10 +418,18 @@ function normalizeUsers(){
 }
 
 function ensureUsers(){
+  const before = JSON.stringify(db.users || {});
   normalizeUsers();
   Object.keys(DEFAULT_USERS).forEach(key=>{
-    if(!db.users[key]) db.users[key] = DEFAULT_USERS[key];
+    if(!db.users[key]) {
+      db.users[key] = {
+        ...DEFAULT_USERS[key],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    }
   });
+  return before !== JSON.stringify(db.users || {});
 }
 
 function canEditProject(){ return currentUserRole==="Admin" || currentUserRole==="PM"; }
@@ -435,32 +454,35 @@ function updateUserProfileBox(){
   const admin=document.getElementById("adminUserPanel");
   if(admin) admin.classList.toggle("hidden", currentUserRole!=="Admin");
 }
-function logout(){ location.reload(); }
+function logout(){
+  if(firebaseReady && firebase.auth){
+    firebase.auth().signOut().finally(()=>location.reload());
+  } else {
+    location.reload();
+  }
+}
 function addOrUpdateUser(){
   if(!requirePermission(currentUserRole==="Admin","Only Admin can add/update users.")) return;
   const email=(document.getElementById("newUserEmail").value||"").trim().toLowerCase();
   const name=(document.getElementById("newUserName").value||"").trim();
-  const password=(document.getElementById("newUserPassword").value||"").trim();
   const role=document.getElementById("newUserRole").value;
-  if(!email || !name || !password){ alert("Please fill email, name and password."); return; }
+  if(!email || !name){ alert("Please fill email and name. Create password in Firebase Authentication, not here."); return; }
   ensureUsers();
   const userKey = emailToKey(email);
   db.users[userKey]={
     email,
     name,
-    password,
     role,
     active:true,
     updatedAt:new Date().toISOString(),
     createdAt: db.users[userKey]?.createdAt || new Date().toISOString()
   };
-  addGlobalActivity({id:"",name:"System"},{id:"",task:"User management"},"User Saved",`${email} saved as ${role}`);
+  addGlobalActivity({id:"",name:"System"},{id:"",task:"User management"},"User Role Saved",`${email} saved as ${role}`);
   save();
   document.getElementById("newUserEmail").value="";
   document.getElementById("newUserName").value="";
-  document.getElementById("newUserPassword").value="";
   document.getElementById("newUserRole").value="Team";
-  alert("User saved. Share the email/password with the user. They can now login from any device.");
+  alert("User role saved. Make sure the same email exists in Firebase Authentication Users.");
 }
 
 const WORKFLOW_TEMPLATE = [
@@ -736,18 +758,27 @@ function applyMinorTaskUpdates(){
   });
 }
 
+let dbListenerStarted = false;
+let dbSeedingUsers = false;
+
 function save(){
+  ensureUsers();
+  normalizeAllDates();
+
   if(firebaseReady && firebaseDBRef){
+    if(!firebase.auth().currentUser){
+      alert("Please login first. Firebase Authentication is required to save data.");
+      return;
+    }
     firebaseDBRef.set(db)
       .then(()=> {
-        normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
         renderAll();
       })
       .catch(error => {
-        console.error("Firebase save failed. Saving locally only.", error);
+        console.error("Firebase save failed.", error);
         localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-        alert("Could not save to Firebase. Saved only on this browser. Check Firebase rules/internet.");
+        alert("Could not save to Firebase. Please check Firebase Rules, internet connection, and login status.");
         renderAll();
       });
   } else {
@@ -756,96 +787,153 @@ function save(){
   }
 }
 
+function applyCurrentUserRoleFromDB(){
+  ensureUsers();
+  const userKey = emailToKey(currentUserEmail);
+  const user = db.users[userKey];
+
+  if(!user){
+    currentUser = currentUserEmail || "Unknown User";
+    currentUserRole = "Viewer";
+    currentUserRecord = null;
+    updateUserProfileBox();
+    alert("Login successful, but this email has no Project Tracker role. Ask Admin to add this user role in the tracker.");
+    return false;
+  }
+
+  if(user.active === false){
+    alert("This user is inactive. Please contact Admin.");
+    logout();
+    return false;
+  }
+
+  currentUser = user.name || currentUserEmail;
+  currentUserRole = user.role || "Viewer";
+  currentUserRecord = user;
+  updateUserProfileBox();
+  return true;
+}
+
+function showLoginScreen(){
+  const loginScreen = document.getElementById("loginScreen");
+  const app = document.getElementById("app");
+  if(loginScreen){ loginScreen.style.display = "block"; loginScreen.classList.remove("hidden"); }
+  if(app){ app.classList.add("hidden"); app.style.display = "none"; }
+}
+
+function showAppScreen(){
+  const loginScreen = document.getElementById("loginScreen");
+  const app = document.getElementById("app");
+  if(loginScreen) loginScreen.style.display = "none";
+  if(app){ app.classList.remove("hidden"); app.style.display = "block"; }
+}
+
 function load(){
+  if(dbListenerStarted) return;
+
   const localCopy = localStorage.getItem("projectTrackerDB");
   if(localCopy){
-    try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [] }; }
+    try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [], users: {} }; }
   }
-  ensureUsers();
 
   if(firebaseReady && firebaseDBRef){
+    dbListenerStarted = true;
     firebaseDBRef.on("value", snapshot => {
       const remoteData = snapshot.val();
+
       if(remoteData === null) {
-        ensureUsers();
-        firebaseDBRef.set(db || {projects: [], users:{}});
+        if(!db || typeof db !== "object") db = { projects: [], users: {} };
+        if(!Array.isArray(db.projects)) db.projects = [];
+        if(!Array.isArray(db.activity)) db.activity = [];
+        const changed = ensureUsers();
+        normalizeAllDates();
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+
+        if(firebase.auth().currentUser){
+          firebaseDBRef.set(db).catch(error => console.error("Initial database seed failed", error));
+        }
+
         const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database - initialized";
-        renderAll();
+        if(mode) mode.textContent = "Firebase Shared Database - initialized with Authentication";
+        if(applyCurrentUserRoleFromDB()) renderAll();
       } else {
         db = remoteData || {};
         if(!Array.isArray(db.projects)) db.projects = [];
         if(!Array.isArray(db.activity)) db.activity = [];
-        ensureUsers();
+        const changed = ensureUsers();
         normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
-        renderAll();
+
+        // Persist default user roles once, without storing any passwords.
+        if(changed && !dbSeedingUsers && firebase.auth().currentUser){
+          dbSeedingUsers = true;
+          firebaseDBRef.child("users").set(db.users).finally(()=>{ dbSeedingUsers = false; });
+        }
+
         const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database";
+        if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication";
+        if(applyCurrentUserRoleFromDB()) renderAll();
       }
     }, error => {
-      console.error("Firebase load failed. Using LocalStorage.", error);
+      console.error("Firebase load failed.", error);
       const mode = document.getElementById("storageMode");
-      if(mode) mode.textContent = "LocalStorage fallback";
-      ensureUsers();
-      renderAll();
+      if(mode) mode.textContent = "Firebase load failed";
+      alert("Could not load Firebase data. Please check Realtime Database Rules and make sure you are logged in. Error: " + error.message);
     });
   } else {
     ensureUsers();
+    applyCurrentUserRoleFromDB();
     renderAll();
   }
 }
 
 function login(){
-  try{
-    const email=(document.getElementById("userInput")?.value || "").trim().toLowerCase();
-    const password=(document.getElementById("passwordInput")?.value || "").trim();
+  const email=(document.getElementById("userInput")?.value || "").trim().toLowerCase();
+  const password=(document.getElementById("passwordInput")?.value || "").trim();
+  const errorBox=document.getElementById("loginError");
 
-    ensureUsers();
-
-    const userKey = emailToKey(email);
-    const user = db.users[userKey];
-
-    if(user && user.password === password && user.active !== false){
-
-      currentUser = user.name || email;
-      currentUserEmail = user.email || email;
-      currentUserRole = user.role || "Viewer";
-      currentUserRecord = user;
-
-      const loginScreen = document.getElementById("loginScreen");
-      const app = document.getElementById("app");
-
-      if(loginScreen) loginScreen.style.display = "none";
-      if(app){
-        app.classList.remove("hidden");
-        app.style.display = "block";
-      }
-
-      updateUserProfileBox();
-
-      try{
-        renderAll();
-      }catch(renderErr){
-        console.error("Render error:", renderErr);
-      }
-
-    } else if(user && user.active === false){
-
-      document.getElementById("loginError").textContent =
-        "This user is inactive. Please contact admin.";
-
-    } else {
-
-      document.getElementById("loginError").textContent =
-        "Incorrect email or password.";
-
-    }
-
-  }catch(err){
-    console.error("Login error:", err);
-    alert("Login failed due to script issue. Please check console.");
+  if(errorBox) errorBox.textContent = "";
+  if(!email || !password){
+    if(errorBox) errorBox.textContent = "Please enter email and password.";
+    return;
   }
+  if(!(firebaseReady && firebase.auth)){
+    if(errorBox) errorBox.textContent = "Firebase Authentication is not initialized. Check Firebase script/config.";
+    return;
+  }
+
+  firebase.auth().signInWithEmailAndPassword(email, password)
+    .catch(error => {
+      console.error("Login failed", error);
+      if(errorBox) errorBox.textContent = "Login failed: " + error.message;
+    });
+}
+
+function initAuthState(){
+  if(!(firebaseReady && firebase.auth)){
+    showLoginScreen();
+    const errorBox=document.getElementById("loginError");
+    if(errorBox) errorBox.textContent = "Firebase Authentication not available. Check internet/Firebase scripts.";
+    return;
+  }
+
+  firebase.auth().onAuthStateChanged(user => {
+    if(user){
+      currentUserEmail = String(user.email || "").toLowerCase();
+      currentUser = user.displayName || currentUserEmail;
+      currentUserRole = "Viewer";
+      showAppScreen();
+      updateUserProfileBox();
+      load();
+    } else {
+      currentUser = "Unknown User";
+      currentUserEmail = "";
+      currentUserRole = "Viewer";
+      currentUserRecord = null;
+      dbListenerStarted = false;
+      showLoginScreen();
+    }
+  });
 }
 
 function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
@@ -892,8 +980,41 @@ function nextPendingTask(p){
   return pending || null;
 }
 function getCurrentStage(p){
-  const pending=p.tasks.find(t=>t.status!=="Done");
-  return pending ? `${pending.stage} / ${pending.sub}` : "Completed";
+  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+  if(!tasks.length) return "Not Started";
+  if(tasks.every(t => t.status === "Done")) return "Completed";
+
+  const workflowOrder = new Map();
+  WORKFLOW_TEMPLATE.forEach((item, index) => {
+    const key = `${item.stage}|||${item.sub}`;
+    if(!workflowOrder.has(key)) workflowOrder.set(key, index);
+  });
+
+  const groups = new Map();
+  tasks.forEach((t, index) => {
+    const stage = t.stage || "Stage Not Updated";
+    const sub = t.sub || "Sub-stage Not Updated";
+    const key = `${stage}|||${sub}`;
+    if(!groups.has(key)){
+      groups.set(key, {
+        stage,
+        sub,
+        order: workflowOrder.has(key) ? workflowOrder.get(key) : WORKFLOW_TEMPLATE.length + index,
+        tasks: []
+      });
+    }
+    groups.get(key).tasks.push(t);
+  });
+
+  const sortedGroups = [...groups.values()].sort((a,b)=>a.order-b.order);
+  const activeGroups = sortedGroups.filter(g => g.tasks.some(t => t.status === "In Progress"));
+  if(activeGroups.length){
+    const current = activeGroups[activeGroups.length - 1];
+    return `${current.stage} / ${current.sub}`;
+  }
+
+  const firstIncomplete = sortedGroups.find(g => !g.tasks.every(t => t.status === "Done"));
+  return firstIncomplete ? `${firstIncomplete.stage} / ${firstIncomplete.sub}` : "Completed";
 }
 function renderDashboard(){
   const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
@@ -1436,7 +1557,7 @@ function restoreBackup(e){
 function downloadFile(name, content, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
 }
-load();
+initAuthState();
 
 
 
