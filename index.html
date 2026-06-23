@@ -289,6 +289,8 @@
               <option>Technical Team</option>
               <option>Purchase Team</option>
               <option>Projects Team</option>
+              <option>Transition Team</option>
+              <option>Billing</option>
             </select>
             <select id="misStatusFilter" onchange="renderMIS()">
               <option value="">All Status</option>
@@ -316,7 +318,7 @@ Do not paste PASTE_HERE values anywhere.
 Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -809,14 +811,31 @@ function applyMinorTaskUpdates(){
 
 let workflowSyncRunning = false;
 function templateTaskKey(t){
+  // Unique workflow identity. technicalTask is intentionally ignored here:
+  // otherwise the same task can be duplicated when a Technical Team assignment is changed later.
   return [
     t.stage || "",
     t.sub || "",
     t.dept || "",
-    t.technicalTask || "",
     canonicalTaskText(t.task)
   ].join("|||");
 }
+function createWorkflowTaskFromTemplate(template, project, sourceText){
+  const task = {
+    ...template,
+    id: uid(),
+    owner: defaultOwnerForDept(project, template.dept),
+    dueDate: "",
+    status: "To Do",
+    remarks: "",
+    delayReason: "",
+    lastUpdated: new Date().toLocaleString(),
+    history: []
+  };
+  addHistory(task, "Created", sourceText + (task.owner ? " and auto-assigned to " + task.owner : ""));
+  return task;
+}
+
 function syncWorkflowTemplateToExistingProjects(){
   if(!Array.isArray(db.projects)) return 0;
   let added = 0;
@@ -826,18 +845,7 @@ function syncWorkflowTemplateToExistingProjects(){
     WORKFLOW_TEMPLATE.forEach(template => {
       const key = templateTaskKey(template);
       if(existingKeys.has(key)) return;
-      const task = {
-        ...template,
-        id: uid(),
-        owner: defaultOwnerForDept(project, template.dept),
-        dueDate: "",
-        status: "To Do",
-        remarks: "",
-        delayReason: "",
-        lastUpdated: new Date().toLocaleString(),
-        history: []
-      };
-      addHistory(task, "Created", "Task added from updated workflow template" + (task.owner ? " and auto-assigned to " + task.owner : ""));
+      const task = createWorkflowTaskFromTemplate(template, project, "Task added from updated workflow template");
       project.tasks.push(task);
       existingKeys.add(key);
       added++;
@@ -851,6 +859,38 @@ function syncWorkflowTemplateToExistingProjects(){
     }
   }
   return added;
+}
+
+function manualSyncWorkflowTemplate(){
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can sync template tasks.")) return;
+  if(!confirm("This will add only missing workflow-template tasks to existing projects. It will not overwrite existing task status/data. Continue?")) return;
+  const added = syncWorkflowTemplateToExistingProjects();
+  alert(added ? (added + " missing template task(s) added.") : "No missing template tasks found.");
+  if(added) save();
+}
+
+function findDuplicateTasks(project){
+  const groups = {};
+  (project.tasks || []).forEach(t => {
+    const key = templateTaskKey(t);
+    if(!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  });
+  return Object.values(groups).filter(group => group.length > 1);
+}
+
+function showDuplicateTaskReport(){
+  const lines = [];
+  (db.projects || []).forEach(project => {
+    const duplicates = findDuplicateTasks(project);
+    if(duplicates.length){
+      lines.push(project.name || project.jobCode || "Untitled Project");
+      duplicates.forEach(group => {
+        lines.push(" - " + (group[0].task || "Unnamed task") + " (" + group.length + " entries)");
+      });
+    }
+  });
+  alert(lines.length ? ("Duplicate tasks found:\n\n" + lines.join("\n")) : "No duplicate tasks found.");
 }
 
 let dbListenerStarted = false;
@@ -1031,7 +1071,7 @@ function initAuthState(){
   });
 }
 
-function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); syncWorkflowTemplateToExistingProjects(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
+function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
 function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
@@ -1372,7 +1412,7 @@ function openProjectForm(id){
     ${field("Order Value","orderValue",p.orderValue)} ${field("RMC Budget","rmcBudget",p.rmcBudget)} ${field("Freight Value","freightValue",p.freightValue)} ${field("Site Expenses","siteExpenses",p.siteExpenses)} ${field("Contractor Budget","contractorBudget",p.contractorBudget)} ${field("Technology & Capacity","technology",p.technology)} ${field("Location","location",p.location)}
     ${field("Start Date","startDate",p.startDate,"date")} ${field("Target Completion Date","targetDate",p.targetDate,"date")} ${field("Project Manager","manager",p.manager)}
     ${field("Contracts Owner","ownerContracts",p.ownerContracts)} ${field("Technical Owner","ownerTechnical",p.ownerTechnical)} ${field("Purchase Owner","ownerPurchase",p.ownerPurchase)}
-    ${field("Projects Owner","ownerProjects",p.ownerProjects)}
+    ${field("Projects Owner","ownerProjects",p.ownerProjects)} ${field("Transition Owner","ownerTransition",p.ownerTransition)} ${field("Billing Owner","ownerBilling",p.ownerBilling)}
   </div><label style="margin-top:12px">Overall Status</label><select id="f_overallStatus">${STATUS.map(s=>`<option ${p.overallStatus===s?"selected":""}>${s}</option>`).join("")}</select>
   <div class="row" style="margin-top:16px"><button class="primary" onclick="saveProject('${id||""}')">Save Project</button><button onclick="closeModal()">Cancel</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
@@ -1383,8 +1423,8 @@ function defaultOwnerForDept(p, dept){
          dept==="Technical Team" ? (p.ownerTechnical||"") :
          dept==="Purchase Team" ? (p.ownerPurchase||"") :
          dept==="Projects Team" ? (p.ownerProjects||"") :
-         dept==="Transition Team" ? (p.ownerProjects||"") :
-         dept==="Billing" ? (p.ownerContracts||"") : "";
+         dept==="Transition Team" ? (p.ownerTransition||p.ownerProjects||"") :
+         dept==="Billing" ? (p.ownerBilling||p.ownerContracts||"") : "";
 }
 function addHistory(task, action, details){
   if(!task.history) task.history=[];
@@ -1424,7 +1464,7 @@ function updateTaskField(projectId, taskId, field, value){
   save();
 }
 function saveProject(id){
-  const data={name:v("name"),jobCode:v("jobCode"),client:v("client"),orderValue:v("orderValue"),rmcBudget:v("rmcBudget"),freightValue:v("freightValue"),siteExpenses:v("siteExpenses"),contractorBudget:v("contractorBudget"),technology:v("technology"),location:v("location"),startDate:v("startDate"),targetDate:v("targetDate"),manager:v("manager"),ownerContracts:v("ownerContracts"),ownerTechnical:v("ownerTechnical"),ownerPurchase:v("ownerPurchase"),ownerProjects:v("ownerProjects"),overallStatus:document.getElementById("f_overallStatus").value};
+  const data={name:v("name"),jobCode:v("jobCode"),client:v("client"),orderValue:v("orderValue"),rmcBudget:v("rmcBudget"),freightValue:v("freightValue"),siteExpenses:v("siteExpenses"),contractorBudget:v("contractorBudget"),technology:v("technology"),location:v("location"),startDate:v("startDate"),targetDate:v("targetDate"),manager:v("manager"),ownerContracts:v("ownerContracts"),ownerTechnical:v("ownerTechnical"),ownerPurchase:v("ownerPurchase"),ownerProjects:v("ownerProjects"),ownerTransition:v("ownerTransition"),ownerBilling:v("ownerBilling"),overallStatus:document.getElementById("f_overallStatus").value};
   if(id){ 
     const existing=db.projects.find(p=>p.id===id);
     Object.assign(existing, data);
@@ -1432,11 +1472,7 @@ function saveProject(id){
   }
   else{
     const newProject={id:uid(),...data,tasks:[]};
-    newProject.tasks=WORKFLOW_TEMPLATE.map((t,i)=>{
-      const task={...t,id:uid(),owner:defaultOwnerForDept(newProject,t.dept),dueDate:"",status:"To Do",remarks:"",delayReason:"",lastUpdated:new Date().toLocaleString(),history:[]};
-      addHistory(task,"Created","Task created from workflow template" + (task.owner ? " and auto-assigned to " + task.owner : ""));
-      return task;
-    });
+    newProject.tasks=WORKFLOW_TEMPLATE.map(t => createWorkflowTaskFromTemplate(t, newProject, "Task created from workflow template"));
     db.projects.push(newProject);
     addGlobalActivity(newProject, {id:"", task:"Project created"}, "Project Created", "New project created with workflow template");
   }
