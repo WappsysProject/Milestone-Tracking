@@ -2936,6 +2936,153 @@ renderDashboard = function(){
 showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
 /* ===== END SPEED + LATEST-STAGE MIS PATCH V4 ===== */
 
+
+/* ===== STAGE-WISE MIS DATE PATCH V5 =====
+   Requirement:
+   - MIS Summary must show date of each stage/stage milestone, not all task rows.
+   - Export must remove: Client, Overall Status, Completion, Health, Latest/Current Stage,
+     Sub-stage, Stage Status, Departments, Owners, Pending/Total Task columns.
+   - Old task data remains untouched. This patch only changes MIS display/export.
+*/
+function projectFieldValueV5(project, keys, defaultValue="Pending"){
+  for(const key of keys){
+    if(hasValue(project && project[key])) return project[key];
+  }
+  return defaultValue;
+}
+
+function stageRecordValueV5(record, keys, defaultValue="Pending"){
+  for(const key of keys){
+    if(hasValue(record && record[key])) return record[key];
+  }
+  return defaultValue;
+}
+
+function getMISStageDateRowsV5(){
+  normalizeDBSafe();
+  const rows = [];
+
+  (db.projects || []).forEach(project => {
+    project.tasks = toSafeArray(project.tasks);
+    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+
+    // Ensures stage/sub-stage date records exist, without creating task rows or deleting task data.
+    if(typeof ensureStageDates === "function") ensureStageDates(project);
+
+    const groups = typeof getProjectStageGroups === "function" ? getProjectStageGroups(project) : [];
+    groups.forEach(group => {
+      const key = group.key || stageDateKey(group.stage, group.sub);
+      const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : { stage: group.stage, sub: group.sub };
+      const planned = normalizeDateForInput(rec.initialPlanningDate || rec.plannedDate || rec.targetDate || "");
+      const actual = normalizeDateForInput(rec.actualDate || rec.completedDate || "");
+      const stageItem = [group.stage || rec.stage || "", group.sub || rec.sub || ""].filter(Boolean).join(" - ");
+
+      rows.push({
+        projectName: project.name || "",
+        jobCode: project.jobCode || "",
+        projectManager: project.manager || "",
+        stageItem,
+        stagePlannedDate: formatDateDisplay(planned),
+        stageActualDate: formatDateDisplay(actual),
+        siteMom: stageRecordValueV5(rec, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"], projectFieldValueV5(project, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"])),
+        quality: stageRecordValueV5(rec, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"], projectFieldValueV5(project, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"])),
+        correspondence: stageRecordValueV5(rec, ["correspondence", "mailStatus", "clientCorrespondence"], projectFieldValueV5(project, ["correspondence", "mailStatus", "clientCorrespondence"])),
+        expense: stageRecordValueV5(rec, ["expense", "expenseStatus", "siteExpense"], projectFieldValueV5(project, ["expense", "expenseStatus", "siteExpense"])),
+        budget: projectFieldValueV5(project, ["budget"], "Pending"),
+        budgetDeviation: stageRecordValueV5(rec, ["budgetDeviation", "deviation"], projectFieldValueV5(project, ["budgetDeviation", "deviation"], "No Deviation")),
+        billingStatus: stageRecordValueV5(rec, ["billingStatus", "billing"], projectFieldValueV5(project, ["billingStatus", "billing"])),
+        collectionStatus: stageRecordValueV5(rec, ["collectionStatus", "collection"], projectFieldValueV5(project, ["collectionStatus", "collection"])),
+        customerFeedback: stageRecordValueV5(rec, ["customerFeedback", "clientFeedback"], projectFieldValueV5(project, ["customerFeedback", "clientFeedback"], ""))
+      });
+    });
+  });
+
+  return rows;
+}
+
+function filteredMISStageDateRowsV5(){
+  const q = (document.getElementById("misSearch")?.value || "").toLowerCase().trim();
+  let rows = getMISStageDateRowsV5();
+  if(q) rows = rows.filter(r => Object.values(r).join(" ").toLowerCase().includes(q));
+  return rows;
+}
+
+function applyMISStageDateUIV5(){
+  const title = document.querySelector("#misView h2");
+  if(title) title.textContent = "MIS / Stage Date Summary";
+  const note = document.querySelector("#misView .toolbar .muted");
+  if(note) note.textContent = "Stage-wise planned and actual dates. This summary does not show individual task date rows.";
+  const h3 = document.querySelector("#misView h3");
+  if(h3) h3.textContent = "Stage-wise MIS Date Data";
+  const search = document.getElementById("misSearch");
+  if(search) search.placeholder = "Search project, job code, manager, stage...";
+
+  // These filters were for task/latest-stage MIS. Hide them because stage-date MIS export no longer contains department/status/task columns.
+  const dept = document.getElementById("misDeptFilter");
+  if(dept) dept.style.display = "none";
+  const status = document.getElementById("misStatusFilter");
+  if(status) status.style.display = "none";
+}
+
+renderMIS = function(){
+  return safeRender("Stage-wise MIS Date Summary", () => {
+    applyMISStageDateUIV5();
+    const table = document.getElementById("misTable");
+    if(!table) return;
+    const rows = filteredMISStageDateRowsV5();
+
+    setText("misRowsCount", rows.length);
+    setText("misMomPending", rows.filter(r => r.siteMom === "Pending").length);
+    setText("misQualityPending", rows.filter(r => r.quality === "Pending").length);
+    setText("misCorrespondencePending", rows.filter(r => r.correspondence === "Pending").length);
+    setText("misExpensePending", rows.filter(r => r.expense === "Pending").length);
+    setText("misBudgetDeviation", rows.filter(r => r.budgetDeviation && !["Pending", "No Deviation"].includes(r.budgetDeviation)).length);
+    setText("misBillingPending", rows.filter(r => r.billingStatus === "Pending").length);
+    setText("misCollectionPending", rows.filter(r => r.collectionStatus === "Pending").length);
+
+    let html = `<tr>
+      <th>Project Name</th><th>Job Code</th><th>Project Manager</th><th>Stage / Milestone</th>
+      <th>Stage Planned Date</th><th>Stage Actual Date</th>
+      <th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th>
+      <th>Budget</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th>
+    </tr>`;
+
+    html += rows.map(r => `<tr>
+      <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.projectManager)}</td><td>${esc(r.stageItem)}</td>
+      <td>${esc(r.stagePlannedDate)}</td><td>${esc(r.stageActualDate)}</td>
+      <td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td>
+      <td>${esc(r.budget)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
+    </tr>`).join("");
+
+    table.innerHTML = html || "";
+  });
+};
+
+exportMISCSV = function(){
+  const rows = filteredMISStageDateRowsV5();
+  const headers = [
+    "Project Name", "Job Code", "Project Manager", "Stage / Milestone",
+    "Stage Planned Date", "Stage Actual Date",
+    "Site Visits / M.O.M Report Status", "Quality Checks Status", "Correspondence", "Expense",
+    "Budget", "Budget Deviation", "Billing Status", "Collection Status", "Customer Feedback"
+  ];
+  const data = rows.map(r => [
+    r.projectName, r.jobCode, r.projectManager, r.stageItem,
+    r.stagePlannedDate, r.stageActualDate,
+    r.siteMom, r.quality, r.correspondence, r.expense,
+    r.budget, r.budgetDeviation, r.billingStatus, r.collectionStatus, r.customerFeedback
+  ]);
+  downloadFile("stage-wise-mis-date-summary.csv", csv([headers, ...data]), "text/csv");
+};
+
+showMIS = function(){
+  setTab("misTab");
+  hideAll();
+  document.getElementById("misView").classList.remove("hidden");
+  renderMIS();
+};
+/* ===== END STAGE-WISE MIS DATE PATCH V5 ===== */
+
 initAuthState();
 
 </script>
