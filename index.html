@@ -105,6 +105,12 @@
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
+
+
+    /* Fail-safe: modal must not block page clicks unless explicitly opened */
+    #modal.hidden{display:none!important;pointer-events:none!important}
+    #modal:not(.hidden){display:flex!important;pointer-events:auto!important}
+    .tabs .tab, button{pointer-events:auto}
   </style>
 </head>
 <body>
@@ -132,7 +138,7 @@
       <div class="tab active" id="dashboardTab" onclick="showDashboard()">All Projects Dashboard</div>
       <div class="tab" id="projectTab" onclick="showProjectView()">Project Tracker</div>
       <div class="tab" id="misTab" onclick="showMIS()">MIS Summary</div>
-      <div class="tab" onclick="showSetup()">Setup / Backup</div>
+      <div class="tab" id="setupTab" onclick="showSetup()">Setup / Backup</div>
     </div>
 
     <section id="dashboardView">
@@ -1912,6 +1918,93 @@ function restoreBackup(e){
 function downloadFile(name, content, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
 }
+
+
+/* ========= CLICK / DASHBOARD FAIL-SAFE PATCH =========
+   This patch keeps navigation buttons working even if one dashboard render throws an error.
+   It does not delete or reset Firebase data.
+*/
+function trackerSafeRun(label, fn){
+  try { return fn(); }
+  catch(error){
+    console.error("Project Tracker error in " + label, error);
+    const msg = "A dashboard section had an error, but navigation is still active. Open browser console for details: " + (error && error.message ? error.message : error);
+    const box = document.getElementById("loginError");
+    if(box && !document.getElementById("app")?.classList.contains("hidden")) box.textContent = msg;
+    return null;
+  }
+}
+function trackerEl(id){ return document.getElementById(id); }
+function trackerHide(id){ const el=trackerEl(id); if(el) el.classList.add("hidden"); }
+function trackerShow(id){ const el=trackerEl(id); if(el) el.classList.remove("hidden"); }
+function trackerSetTabSafe(id){
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  const el = trackerEl(id);
+  if(el) el.classList.add("active");
+}
+function trackerHideAllViews(){ ["dashboardView","projectView","misView","setupView"].forEach(trackerHide); }
+function trackerEnsureProjectSelected(){
+  if(!currentProjectId && Array.isArray(db.projects) && db.projects.length) currentProjectId = db.projects[0].id;
+}
+window.showDashboard = function(){
+  trackerSetTabSafe("dashboardTab");
+  trackerHideAllViews();
+  trackerShow("dashboardView");
+  trackerSafeRun("Dashboard", function(){ normalizeDB(); renderDashboard(); });
+};
+window.showProjectView = function(){
+  trackerSetTabSafe("projectTab");
+  trackerHideAllViews();
+  trackerShow("projectView");
+  trackerSafeRun("Project View", function(){ normalizeDB(); trackerEnsureProjectSelected(); renderProject(); });
+};
+window.showMIS = function(){
+  trackerSetTabSafe("misTab");
+  trackerHideAllViews();
+  trackerShow("misView");
+  trackerSafeRun("MIS Summary", function(){ normalizeDB(); renderMIS(); });
+};
+window.showSetup = function(){
+  trackerSetTabSafe("setupTab");
+  trackerHideAllViews();
+  trackerShow("setupView");
+};
+window.logout = function(){
+  trackerSafeRun("Logout", function(){
+    if(firebaseReady && window.firebase && firebase.auth){
+      firebase.auth().signOut().finally(function(){ location.reload(); });
+    } else {
+      location.reload();
+    }
+  });
+};
+
+window.addEventListener("error", function(event){
+  console.error("Global Project Tracker JS error:", event.error || event.message);
+});
+
+window.addEventListener("DOMContentLoaded", function(){
+  const modal = trackerEl("modal");
+  if(modal) modal.classList.add("hidden");
+
+  // Capture important navigation clicks before any broken inline handler can stop the page.
+  document.addEventListener("click", function(e){
+    const tab = e.target.closest && e.target.closest(".tab");
+    if(tab){
+      const id = tab.id || "";
+      if(id === "dashboardTab"){ e.preventDefault(); e.stopPropagation(); window.showDashboard(); return; }
+      if(id === "projectTab"){ e.preventDefault(); e.stopPropagation(); window.showProjectView(); return; }
+      if(id === "misTab"){ e.preventDefault(); e.stopPropagation(); window.showMIS(); return; }
+      if(id === "setupTab" || (tab.textContent || "").includes("Setup")){ e.preventDefault(); e.stopPropagation(); window.showSetup(); return; }
+    }
+    const btn = e.target.closest && e.target.closest("button");
+    if(btn && (btn.textContent || "").trim().toLowerCase() === "logout"){
+      e.preventDefault(); e.stopPropagation(); window.logout();
+    }
+  }, true);
+});
+/* ========= END CLICK / DASHBOARD FAIL-SAFE PATCH ========= */
+
 initAuthState();
 
 
