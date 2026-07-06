@@ -3083,6 +3083,276 @@ showMIS = function(){
 };
 /* ===== END STAGE-WISE MIS DATE PATCH V5 ===== */
 
+
+/* ===== AUTO ACTUAL DATE LOCK PATCH V6 =====
+   Requirement:
+   - Stage Actual Date must be automatic only.
+   - Actual Date is calculated from the date when tasks are marked Done.
+   - Users/Admin/PM cannot manually edit Stage Actual Date from UI.
+   - MIS display/export uses the automatic stage actual date, not task rows and not manually entered dates.
+*/
+function localDateInputV6(dateObj){
+  const d = dateObj instanceof Date ? dateObj : new Date();
+  const local = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+  return local.toISOString().slice(0,10);
+}
+
+function dateFromTaskDoneV6(task){
+  if(!task) return "";
+  return normalizeDateForInput(
+    task.doneDate ||
+    task.markedDoneDate ||
+    task.completedDate ||
+    task.doneAt ||
+    task.lastUpdated ||
+    ""
+  ) || "";
+}
+
+function stampTaskDoneDateV6(task, oldStatus, newStatus){
+  if(!task) return false;
+  let changed = false;
+  if(newStatus === "Done" && oldStatus !== "Done"){
+    task.doneDate = localDateInputV6();
+    task.doneAt = new Date().toISOString();
+    task.doneBy = currentUser || currentUserEmail || "Unknown User";
+    changed = true;
+  }
+  if(newStatus !== "Done" && oldStatus === "Done"){
+    task.reopenedAt = new Date().toISOString();
+    task.reopenedBy = currentUser || currentUserEmail || "Unknown User";
+    delete task.doneDate;
+    delete task.doneAt;
+    delete task.doneBy;
+    changed = true;
+  }
+  return changed;
+}
+
+function getStageAutoActualDateV6(project, stageOrGroup, sub){
+  if(!project) return "";
+  const stage = typeof stageOrGroup === "object" ? stageOrGroup.stage : stageOrGroup;
+  const subStage = typeof stageOrGroup === "object" ? stageOrGroup.sub : sub;
+  const tasks = getStageTasks(project, stage, subStage);
+  if(!tasks.length) return "";
+  if(!tasks.every(task => task.status === "Done")) return "";
+
+  const doneDates = tasks.map(dateFromTaskDoneV6).filter(Boolean).sort();
+  if(doneDates.length) return doneDates[doneDates.length - 1];
+
+  // Recovery fallback for older already-completed stages that do not have task doneDate yet.
+  const rec = getStageDateRecord(project, stage, subStage);
+  return normalizeDateForInput(rec.actualDate) || localDateInputV6();
+}
+
+function syncStageActualDateV6(project, stageOrGroup, sub){
+  if(!project) return false;
+  ensureStageDates(project);
+  const stage = typeof stageOrGroup === "object" ? stageOrGroup.stage : stageOrGroup;
+  const subStage = typeof stageOrGroup === "object" ? stageOrGroup.sub : sub;
+  const key = stageDateKey(stage, subStage);
+  const rec = project.stageDates[key];
+  if(!rec) return false;
+
+  const autoActual = getStageAutoActualDateV6(project, stage, subStage);
+  const oldActual = normalizeDateForInput(rec.actualDate) || "";
+  const wasAutoManaged = rec.actualDateSource === "auto" || rec.actualDateLocked === true;
+  let changed = false;
+
+  rec.actualDateLocked = true;
+
+  if(autoActual && (oldActual !== autoActual || rec.actualDateSource !== "auto")){
+    rec.actualDate = autoActual;
+    rec.actualDateSource = "auto";
+    rec.actualDateUpdatedAt = new Date().toISOString();
+    changed = true;
+  }
+
+  // If a stage is reopened after the system completed it, clear only the auto-generated date.
+  // Pre-existing/manual dates are not deleted for safety, but the UI/MIS ignores them unless the stage is actually complete.
+  if(!autoActual && wasAutoManaged && rec.actualDateSource === "auto" && oldActual){
+    rec.actualDate = "";
+    rec.actualDateUpdatedAt = new Date().toISOString();
+    changed = true;
+  }
+
+  return changed;
+}
+
+function syncAllStageActualDatesV6(project){
+  if(!project) return false;
+  ensureStageDates(project);
+  let changed = false;
+  getProjectStageGroups(project).forEach(group => {
+    if(syncStageActualDateV6(project, group)) changed = true;
+  });
+  return changed;
+}
+
+// Stage Actual Date is now system-controlled. Planned date remains editable by Admin/PM.
+const updateStageDateBeforeAutoLockV6 = updateStageDate;
+updateStageDate = function(projectId, key, field, value){
+  if(field === "actualDate"){
+    alert("Stage Actual Date is auto-filled when all tasks under this stage are marked Done. It cannot be edited manually.");
+    renderProject();
+    return;
+  }
+  return updateStageDateBeforeAutoLockV6(projectId, key, field, value);
+};
+
+renderStageDateTable = function(project){
+  const table = document.getElementById("stageDateTable");
+  if(!table) return;
+  ensureStageDates(project);
+  syncAllStageActualDatesV6(project);
+  const groups = getProjectStageGroups(project);
+  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Stage Planned Date</th><th>Stage Actual Date (Auto)</th><th>Stage Status</th><th>Pending Tasks</th></tr>`;
+  groups.forEach(group => {
+    const rec = getStageDateRecord(project, group.stage, group.sub);
+    const tasks = getStageTasks(project, group.stage, group.sub);
+    const pending = tasks.filter(t=>t.status!=="Done").length;
+    const completed = tasks.length > 0 && pending === 0;
+    const status = completed ? "Completed" : (tasks.some(t=>t.status==="In Progress") ? "In Progress" : "Pending");
+    const autoActual = getStageAutoActualDateV6(project, group);
+    const actualDisplay = autoActual ? formatDateDisplay(autoActual) : "Auto after all tasks Done";
+    html += `<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td><span class="pill" title="System generated from task Done dates. Manual editing is disabled.">${esc(actualDisplay)}</span></td>
+      <td>${esc(status)}</td>
+      <td>${pending}</td>
+    </tr>`;
+  });
+  table.innerHTML = html;
+};
+
+updateTaskField = function(projectId, taskId, field, value){
+  const p = (db.projects || []).find(x=>x.id===projectId); if(!p) return;
+  p.tasks = toSafeArray(p.tasks);
+  const t = p.tasks.find(x=>x.id===taskId); if(!t) return;
+  if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
+  if(field === "owner" && !(currentUserRole === "Admin" || currentUserRole === "PM")){
+    alert("Only Admin/PM can change owner."); renderProject(); return;
+  }
+
+  const oldValue = t[field] || "";
+  if(oldValue === value) return;
+  const oldStage = t.stage;
+  const oldSub = t.sub;
+  const oldStatus = t.status || "To Do";
+
+  t[field] = value;
+  if(field === "status") stampTaskDoneDateV6(t, oldStatus, value);
+  t.lastUpdated = new Date().toLocaleString();
+
+  const labelMap = {status:"Status", owner:"Owner"};
+  const details = `${labelMap[field]||field} changed from "${oldValue}" to "${value}"`;
+  addHistory(t,"Updated",details);
+  addGlobalActivity(p,t,"Task Updated",details);
+
+  syncStageActualDateV6(p, oldStage, oldSub);
+  syncStageActualDateV6(p, t.stage, t.sub);
+  save();
+};
+
+saveTask = function(id){
+  const p = (db.projects || []).find(x=>x.id===currentProjectId);
+  if(!p) return;
+  p.tasks = toSafeArray(p.tasks);
+  const data = {
+    stage:v("stage"), sub:v("sub"), technicalTask:v("technicalTask"), dept:document.getElementById("f_dept").value,
+    task:document.getElementById("f_task").value.trim(), owner:v("owner"), planning:v("planning"), visitorPerson:v("visitorPerson"),
+    siteReport:v("siteReport"), checkPoints:v("checkPoints"), checkingPerson:v("checkingPerson"), qualityCheckReport:v("qualityCheckReport"),
+    monthlyCorrespondence:v("monthlyCorrespondence"), budget:v("budget"), expensesIncurred:v("expensesIncurred"), plannedBilling:v("plannedBilling"),
+    actualBilling:v("actualBilling"), collection:v("collection"), status:document.getElementById("f_status").value,
+    remarks:document.getElementById("f_remarks").value.trim(), delayReason:document.getElementById("f_delayReason").value.trim(),
+    lastUpdated:new Date().toLocaleString()
+  };
+
+  if(id){
+    const task = p.tasks.find(t=>t.id===id);
+    if(!task) return;
+    const oldStage = task.stage;
+    const oldSub = task.sub;
+    const oldStatus = task.status || "To Do";
+    const changes = [];
+    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
+      if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
+    });
+    Object.assign(task, data);
+    stampTaskDoneDateV6(task, oldStatus, data.status);
+    syncStageActualDateV6(p, oldStage, oldSub);
+    syncStageActualDateV6(p, task.stage, task.sub);
+    if(changes.length){
+      const detailText = changes.join("; ");
+      addHistory(task,"Updated",detailText);
+      addGlobalActivity(p,task,"Task Updated",detailText);
+    }
+  } else {
+    const task = {id:uid(), ...data, history:[]};
+    stampTaskDoneDateV6(task, "To Do", task.status);
+    addHistory(task,"Created","Task manually added");
+    p.tasks.push(task);
+    syncStageActualDateV6(p, task.stage, task.sub);
+    addGlobalActivity(p,task,"Task Created","Task manually added");
+  }
+  closeModal();
+  save();
+};
+
+// Ensure Firebase saves also keep auto actual dates consistent.
+const saveBeforeAutoActualV6 = save;
+save = function(){
+  normalizeDBSafe();
+  (db.projects || []).forEach(project => syncAllStageActualDatesV6(project));
+  return saveBeforeAutoActualV6();
+};
+
+// Make MIS stage actual date use automatic completion date only.
+getMISStageDateRowsV5 = function(){
+  normalizeDBSafe();
+  const rows = [];
+
+  (db.projects || []).forEach(project => {
+    project.tasks = toSafeArray(project.tasks);
+    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+    if(typeof ensureStageDates === "function") ensureStageDates(project);
+    syncAllStageActualDatesV6(project);
+
+    const groups = typeof getProjectStageGroups === "function" ? getProjectStageGroups(project) : [];
+    groups.forEach(group => {
+      const key = group.key || stageDateKey(group.stage, group.sub);
+      const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : { stage: group.stage, sub: group.sub };
+      const planned = normalizeDateForInput(rec.initialPlanningDate || rec.plannedDate || rec.targetDate || "");
+      const autoActual = getStageAutoActualDateV6(project, group);
+      const stageItem = [group.stage || rec.stage || "", group.sub || rec.sub || ""].filter(Boolean).join(" - ");
+
+      rows.push({
+        projectName: project.name || "",
+        jobCode: project.jobCode || "",
+        projectManager: project.manager || "",
+        stageItem,
+        stagePlannedDate: formatDateDisplay(planned),
+        stageActualDate: autoActual ? formatDateDisplay(autoActual) : "",
+        siteMom: stageRecordValueV5(rec, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"], projectFieldValueV5(project, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"])),
+        quality: stageRecordValueV5(rec, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"], projectFieldValueV5(project, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"])),
+        correspondence: stageRecordValueV5(rec, ["correspondence", "mailStatus", "clientCorrespondence"], projectFieldValueV5(project, ["correspondence", "mailStatus", "clientCorrespondence"])),
+        expense: stageRecordValueV5(rec, ["expense", "expenseStatus", "siteExpense"], projectFieldValueV5(project, ["expense", "expenseStatus", "siteExpense"])),
+        budget: projectFieldValueV5(project, ["budget"], "Pending"),
+        budgetDeviation: stageRecordValueV5(rec, ["budgetDeviation", "deviation"], projectFieldValueV5(project, ["budgetDeviation", "deviation"], "No Deviation")),
+        billingStatus: stageRecordValueV5(rec, ["billingStatus", "billing"], projectFieldValueV5(project, ["billingStatus", "billing"])),
+        collectionStatus: stageRecordValueV5(rec, ["collectionStatus", "collection"], projectFieldValueV5(project, ["collectionStatus", "collection"])),
+        customerFeedback: stageRecordValueV5(rec, ["customerFeedback", "clientFeedback"], projectFieldValueV5(project, ["customerFeedback", "clientFeedback"], ""))
+      });
+    });
+  });
+
+  return rows;
+};
+
+/* ===== END AUTO ACTUAL DATE LOCK PATCH V6 ===== */
+
 initAuthState();
 
 </script>
