@@ -162,9 +162,9 @@
         <div class="kpi"><div class="lbl">Delayed Projects</div><div class="num" id="kpiDelayedProjects">0</div></div>
         <div class="kpi"><div class="lbl">Completed Projects</div><div class="num" id="kpiCompletedProjects">0</div></div>
         <div class="kpi"><div class="lbl">Avg Completion</div><div class="num" id="kpiCompletion">0%</div></div>
-        <div class="kpi"><div class="lbl">Overdue Tasks</div><div class="num" id="kpiOverdueTasks">0</div></div>
-        <div class="kpi"><div class="lbl">Due Today</div><div class="num" id="kpiDueToday">0</div></div>
-        <div class="kpi"><div class="lbl">Due This Week</div><div class="num" id="kpiDueWeek">0</div></div>
+        <div class="kpi"><div class="lbl">Overdue Stages</div><div class="num" id="kpiOverdueTasks">0</div></div>
+        <div class="kpi"><div class="lbl">Stages Due Today</div><div class="num" id="kpiDueToday">0</div></div>
+        <div class="kpi"><div class="lbl">Stages Due This Week</div><div class="num" id="kpiDueWeek">0</div></div>
       </div>
 
       <div class="grid grid-3" style="margin-top:16px">
@@ -173,7 +173,7 @@
           <div id="deptDashboard"></div>
         </div>
         <div class="card">
-          <h3 style="margin-top:0">Due Date Alerts</h3>
+          <h3 style="margin-top:0">Stage Date Alerts</h3>
           <div id="alertDashboard"></div>
         </div>
         <div class="card">
@@ -232,6 +232,18 @@
         <div class="kpi"><div class="lbl">To Do</div><div class="num" id="pTodo">0</div></div>
         <div class="kpi"><div class="lbl">In Progress</div><div class="num" id="pProgress">0</div></div>
         <div class="kpi"><div class="lbl">Done</div><div class="num" id="pDone">0</div></div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <div>
+            <h3 style="margin:0">Stage-wise Dates</h3>
+            <p class="muted" style="margin:4px 0 0">Task-level dates have been removed. Enter planned and actual dates at stage/sub-stage level; MIS Summary will use these dates.</p>
+          </div>
+        </div>
+        <div class="table-scroll" style="overflow:auto;max-height:45vh;margin-top:12px">
+          <table id="stageDateTable"></table>
+        </div>
       </div>
 
       <div class="card">
@@ -700,7 +712,11 @@ function normalizeDateFields(obj){
 function normalizeAllDates(){
   (db.projects||[]).forEach(p=>{
     normalizeDateFields(p);
-    (p.tasks||[]).forEach(t=>normalizeDateFields(t));
+    ensureStageDates(p);
+    (p.tasks||[]).forEach(t=>{
+      normalizeDateFields(t);
+      clearTaskLevelDateFields(t);
+    });
   });
 }
 
@@ -712,6 +728,152 @@ function canonicalTaskText(value){
     .replace(/[^a-z0-9]+/g," ")
     .replace(/\s+/g," ")
     .trim();
+}
+
+
+function stageDateKey(stage, sub){
+  return `${canonicalTaskText(stage)}|||${canonicalTaskText(sub)}`;
+}
+function clearTaskLevelDateFields(task){
+  if(!task) return;
+  // Dates are now controlled only at stage/sub-stage level.
+  delete task.dueDate;
+  delete task.initialPlanningDate;
+  delete task.actualDate;
+}
+function getProjectStageGroups(project){
+  const groups = new Map();
+  const addGroup = (stage, sub, order) => {
+    const safeStage = stage || "Stage Not Updated";
+    const safeSub = sub || "Sub-stage Not Updated";
+    const key = stageDateKey(safeStage, safeSub);
+    if(!groups.has(key)) groups.set(key, { key, stage:safeStage, sub:safeSub, order });
+  };
+  WORKFLOW_TEMPLATE.forEach((item, index) => addGroup(item.stage, item.sub, index));
+  (project?.tasks || []).forEach((task, index) => addGroup(task.stage, task.sub, WORKFLOW_TEMPLATE.length + index));
+  return [...groups.values()].sort((a,b)=>a.order-b.order);
+}
+function getStageTasks(project, stage, sub){
+  const stageKey = canonicalTaskText(stage);
+  const subKey = canonicalTaskText(sub);
+  return (project?.tasks || []).filter(task => canonicalTaskText(task.stage)===stageKey && canonicalTaskText(task.sub)===subKey);
+}
+function ensureStageDates(project){
+  if(!project) return {};
+  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+  const groups = getProjectStageGroups(project);
+
+  groups.forEach(group => {
+    const key = group.key;
+    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
+      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
+    }
+    const rec = project.stageDates[key];
+    rec.stage = group.stage;
+    rec.sub = group.sub;
+    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
+    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
+
+    // One-time migration: if old task-level dates exist, copy them to the stage date record.
+    const relatedTasks = getStageTasks(project, group.stage, group.sub);
+    if(!rec.initialPlanningDate){
+      const plannedDates = relatedTasks
+        .map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate))
+        .filter(Boolean)
+        .sort();
+      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
+    }
+    if(!rec.actualDate){
+      const actualDates = relatedTasks
+        .map(t => normalizeDateForInput(t.actualDate))
+        .filter(Boolean)
+        .sort();
+      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
+    }
+  });
+
+  // Remove any old task-level dates so the tracker has only stage dates going forward.
+  (project.tasks || []).forEach(clearTaskLevelDateFields);
+  return project.stageDates;
+}
+function getStageDateRecord(project, stage, sub){
+  ensureStageDates(project);
+  const key = stageDateKey(stage, sub);
+  return project.stageDates[key] || { stage, sub, initialPlanningDate:"", actualDate:"" };
+}
+function isStageComplete(project, group){
+  const tasks = getStageTasks(project, group.stage, group.sub);
+  return tasks.length > 0 && tasks.every(task => task.status === "Done");
+}
+function isStageOverdue(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  return rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) < 0;
+}
+function isStageDueToday(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  return rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) === 0;
+}
+function isStageDueThisWeek(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  const d = daysFromToday(rec.initialPlanningDate);
+  return rec.initialPlanningDate && !isStageComplete(project, group) && d >= 0 && d <= 7;
+}
+function stageDateForTask(project, task, field="initialPlanningDate"){
+  const rec = getStageDateRecord(project, task.stage, task.sub);
+  return rec[field] || "";
+}
+function nextPendingStage(project){
+  const groups = getProjectStageGroups(project).filter(group => !isStageComplete(project, group));
+  if(!groups.length) return null;
+  return groups.sort((a,b)=>{
+    const da = getStageDateRecord(project, a.stage, a.sub).initialPlanningDate || "9999-12-31";
+    const db = getStageDateRecord(project, b.stage, b.sub).initialPlanningDate || "9999-12-31";
+    if(da !== db) return da.localeCompare(db);
+    return a.order - b.order;
+  })[0];
+}
+function getEarliestStageDate(project, field="initialPlanningDate"){
+  ensureStageDates(project);
+  const dates = Object.values(project.stageDates || {}).map(r=>normalizeDateForInput(r[field])).filter(Boolean).sort();
+  return dates.length ? dates[0] : "";
+}
+function getLatestStageDate(project, field="actualDate"){
+  ensureStageDates(project);
+  const dates = Object.values(project.stageDates || {}).map(r=>normalizeDateForInput(r[field])).filter(Boolean).sort();
+  return dates.length ? dates[dates.length - 1] : "";
+}
+function updateStageDate(projectId, key, field, value){
+  if(!requirePermission(canEditProject(), "Only Admin/PM can update stage dates.")) return;
+  const project = db.projects.find(x=>x.id===projectId); if(!project) return;
+  ensureStageDates(project);
+  const rec = project.stageDates[key]; if(!rec) return;
+  const cleanValue = normalizeDateForInput(value);
+  const oldValue = rec[field] || "";
+  if(oldValue === cleanValue) return;
+  rec[field] = cleanValue;
+  addGlobalActivity(project, {id:"", task:`${rec.stage} / ${rec.sub}`}, "Stage Date Updated", `${field === "actualDate" ? "Actual" : "Planned"} date changed from "${formatDateDisplay(oldValue)||"-"}" to "${formatDateDisplay(cleanValue)||"-"}"`);
+  save();
+}
+function renderStageDateTable(project){
+  const table = document.getElementById("stageDateTable"); if(!table) return;
+  ensureStageDates(project);
+  const groups = getProjectStageGroups(project);
+  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Stage Planned Date</th><th>Stage Actual Date</th><th>Stage Status</th><th>Pending Tasks</th></tr>`;
+  groups.forEach(group => {
+    const rec = getStageDateRecord(project, group.stage, group.sub);
+    const tasks = getStageTasks(project, group.stage, group.sub);
+    const pending = tasks.filter(t=>t.status!=="Done").length;
+    const status = isStageComplete(project, group) ? "Completed" : (tasks.some(t=>t.status==="In Progress") ? "In Progress" : "Pending");
+    html += `<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','actualDate',this.value)"></td>
+      <td>${esc(status)}</td>
+      <td>${pending}</td>
+    </tr>`;
+  });
+  table.innerHTML = html;
 }
 
 const TECHNICAL_TASK_ASSIGNMENTS = {
@@ -825,7 +987,6 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
     ...template,
     id: uid(),
     owner: defaultOwnerForDept(project, template.dept),
-    dueDate: "",
     status: "To Do",
     remarks: "",
     delayReason: "",
@@ -1086,22 +1247,24 @@ function daysFromToday(dateStr){
   const t = parseDateFlexible(today());
   return Math.round((d - t) / (1000*60*60*24));
 }
-function isOverdueTask(t){ return t.dueDate && t.status !== "Done" && daysFromToday(t.dueDate) < 0; }
-function isDueTodayTask(t){ return t.dueDate && t.status !== "Done" && daysFromToday(t.dueDate) === 0; }
-function isDueThisWeekTask(t){ const d = daysFromToday(t.dueDate); return t.dueDate && t.status !== "Done" && d >= 0 && d <= 7; }
+function isOverdueTask(t){ return false; } // task-level dates removed; stage dates drive delays
+function isDueTodayTask(t){ return false; }
+function isDueThisWeekTask(t){ return false; }
 function isCriticalTask(t){ return String(t.critical || "").toLowerCase() === "yes" || String(t.priority || "").toLowerCase() === "critical"; }
 
 function stats(p){
+  ensureStageDates(p);
   const total=p.tasks.length;
   const done=p.tasks.filter(t=>t.status==="Done").length;
   const progress=p.tasks.filter(t=>t.status==="In Progress").length;
   const todo=p.tasks.filter(t=>t.status==="To Do").length;
-  const overdue=p.tasks.filter(isOverdueTask).length;
-  const dueToday=p.tasks.filter(isDueTodayTask).length;
-  const dueWeek=p.tasks.filter(isDueThisWeekTask).length;
-  const criticalOverdue=p.tasks.filter(t=>isOverdueTask(t) && isCriticalTask(t)).length;
+  const stageGroups=getProjectStageGroups(p);
+  const overdue=stageGroups.filter(g=>isStageOverdue(p,g)).length;
+  const dueToday=stageGroups.filter(g=>isStageDueToday(p,g)).length;
+  const dueWeek=stageGroups.filter(g=>isStageDueThisWeek(p,g)).length;
+  const criticalOverdue=0;
   const completion= total?Math.round(done*100/total):0;
-  const health = overdue===0 ? "Green" : (overdue<=3 && criticalOverdue===0 ? "Amber" : "Red");
+  const health = overdue===0 ? "Green" : (overdue<=3 ? "Amber" : "Red");
   return {total,done,progress,todo,overdue,dueToday,dueWeek,criticalOverdue,completion,health};
 }
 function healthBadge(health){
@@ -1109,9 +1272,15 @@ function healthBadge(health){
   return `<span class="health ${c}">${health}</span>`;
 }
 function nextPendingTask(p){
-  const pending = p.tasks
+  ensureStageDates(p);
+  const pending = (p.tasks || [])
     .filter(t=>t.status!=="Done")
-    .sort((a,b)=>(a.dueDate||"9999-12-31").localeCompare(b.dueDate||"9999-12-31"))[0];
+    .sort((a,b)=>{
+      const da = stageDateForTask(p,a,"initialPlanningDate") || "9999-12-31";
+      const db = stageDateForTask(p,b,"initialPlanningDate") || "9999-12-31";
+      if(da !== db) return da.localeCompare(db);
+      return (p.tasks || []).indexOf(a) - (p.tasks || []).indexOf(b);
+    })[0];
   return pending || null;
 }
 function getCurrentStage(p){
@@ -1196,7 +1365,7 @@ function renderDashboard(){
       <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
       <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
       <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
-      <div class="summary-line"><b>Next Due</b><span>${next ? esc(formatDateDisplay(next.dueDate)||"-") : "-"}</span></div>
+      <div class="summary-line"><b>Stage Planned Date</b><span>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</span></div>
       <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
       <div class="bar"><span style="width:${s.completion}%"></span></div>
       <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
@@ -1220,7 +1389,7 @@ function renderActivityFeed(){
 
 function renderCurrentStageTable(projects){
   const el=document.getElementById("currentStageTable"); if(!el) return;
-  let rows=`<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Due Date</th></tr>`;
+  let rows=`<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Stage Planned Date</th></tr>`;
   projects.forEach(p=>{
     const s=stats(p);
     const next=nextPendingTask(p);
@@ -1233,7 +1402,7 @@ function renderCurrentStageTable(projects){
       <td>${esc(stageParts[1]||"-")}</td>
       <td>${next ? esc(next.task) : "All tasks completed"}</td>
       <td>${next ? esc(next.owner||"-") : "-"}</td>
-      <td>${next ? esc(formatDateDisplay(next.dueDate)||"-") : "-"}</td>
+      <td>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</td>
     </tr>`;
   });
   el.innerHTML=rows;
@@ -1267,33 +1436,46 @@ function renderDepartmentDashboard(){
 function renderAlertsDashboard(){
   const el=document.getElementById("alertDashboard"); if(!el) return;
   const alerts=[];
-  db.projects.forEach(p=>p.tasks.forEach(t=>{
-    if(t.status==="Done") return;
-    if(isOverdueTask(t)) alerts.push({type:"overdue", project:p, task:t, label:"Overdue"});
-    else if(isDueTodayTask(t)) alerts.push({type:"today", project:p, task:t, label:"Due Today"});
-    else if(isDueThisWeekTask(t)) alerts.push({type:"week", project:p, task:t, label:"Due This Week"});
-  }));
-  alerts.sort((a,b)=>(a.task.dueDate||"9999-12-31").localeCompare(b.task.dueDate||"9999-12-31"));
+  db.projects.forEach(project=>{
+    ensureStageDates(project);
+    getProjectStageGroups(project).forEach(group=>{
+      const rec = getStageDateRecord(project, group.stage, group.sub);
+      if(isStageOverdue(project, group)) alerts.push({type:"overdue", project, group, date:rec.initialPlanningDate, label:"Overdue Stage"});
+      else if(isStageDueToday(project, group)) alerts.push({type:"today", project, group, date:rec.initialPlanningDate, label:"Stage Due Today"});
+      else if(isStageDueThisWeek(project, group)) alerts.push({type:"week", project, group, date:rec.initialPlanningDate, label:"Stage Due This Week"});
+    });
+  });
+  alerts.sort((a,b)=>(a.date||"9999-12-31").localeCompare(b.date||"9999-12-31"));
   el.innerHTML = `<div class="alert-list">` + (alerts.slice(0,12).map(a=>`
     <div class="alert-item ${a.type}">
-      <b>${esc(a.label)}:</b> ${esc(a.task.task)}
-      <div class="muted">${esc(a.project.name||"Project")} · ${esc(a.task.dept)} · Owner: ${esc(a.task.owner||"-")} · Due: ${esc(a.task.dueDate||"-")}</div>
-    </div>`).join("") || `<p class="muted">No overdue or upcoming tasks.</p>`) + `</div>`;
+      <b>${esc(a.label)}:</b> ${esc(a.group.stage)} / ${esc(a.group.sub)}
+      <div class="muted">${esc(a.project.name||"Project")} · Planned Date: ${esc(formatDateDisplay(a.date)||"-")}</div>
+    </div>`).join("") || `<p class="muted">No overdue or upcoming stages.</p>`) + `</div>`;
 }
 
 function renderNotificationDashboard(){
   const el=document.getElementById("notificationDashboard"); if(!el) return;
   const notifications=[];
-  db.projects.forEach(p=>p.tasks.forEach(t=>{
-    if(t.status==="Done") return;
-    if(!t.owner) notifications.push({level:"Missing Owner", project:p, task:t});
-    if(!t.dueDate) notifications.push({level:"Missing Due Date", project:p, task:t});
-    if(typeof isOverdueTask==="function" && isOverdueTask(t)) notifications.push({level:"Escalation Required", project:p, task:t});
-  }));
+  db.projects.forEach(project=>{
+    ensureStageDates(project);
+    (project.tasks||[]).forEach(task=>{
+      if(task.status==="Done") return;
+      if(!task.owner) notifications.push({level:"Missing Owner", project, task});
+    });
+    getProjectStageGroups(project).forEach(group=>{
+      const rec = getStageDateRecord(project, group.stage, group.sub);
+      if(!isStageComplete(project, group) && !rec.initialPlanningDate) {
+        notifications.push({level:"Missing Stage Planned Date", project, task:{task:`${group.stage} / ${group.sub}`, dept:"Stage Date", owner:"-"}});
+      }
+      if(isStageOverdue(project, group)) {
+        notifications.push({level:"Stage Escalation Required", project, task:{task:`${group.stage} / ${group.sub}`, dept:"Stage Date", owner:"-"}});
+      }
+    });
+  });
   el.innerHTML = notifications.slice(0,12).map(n=>`
-    <div class="alert-item ${n.level==='Escalation Required'?'overdue':''}">
+    <div class="alert-item ${n.level==='Stage Escalation Required'?'overdue':''}">
       <b>${esc(n.level)}</b>: ${esc(n.task.task)}
-      <div class="muted">${esc(n.project.name||"Project")} · ${esc(n.task.dept)} · Owner: ${esc(n.task.owner||"-")} · Due: ${esc(n.task.dueDate||"-")}</div>
+      <div class="muted">${esc(n.project.name||"Project")} · ${esc(n.task.dept)} · Owner: ${esc(n.task.owner||"-")}</div>
     </div>
   `).join("") || `<p class="muted">No system notifications.</p>`;
 }
@@ -1308,16 +1490,17 @@ function renderMyTasksDashboard(owner){
   db.projects.forEach(p=>p.tasks.forEach(t=>{
     if(String(t.owner||"").toLowerCase().includes(owner) && t.status!=="Done") tasks.push({project:p, task:t});
   }));
-  tasks.sort((a,b)=>(a.task.dueDate||"9999-12-31").localeCompare(b.task.dueDate||"9999-12-31"));
+  tasks.sort((a,b)=>(stageDateForTask(a.project,a.task,"initialPlanningDate")||"9999-12-31").localeCompare(stageDateForTask(b.project,b.task,"initialPlanningDate")||"9999-12-31"));
   el.innerHTML = tasks.slice(0,12).map(x=>{
-    const label = isOverdueTask(x.task) ? "Overdue" : isDueTodayTask(x.task) ? "Due Today" : isDueThisWeekTask(x.task) ? "Due This Week" : x.task.status;
+    const plannedDate = stageDateForTask(x.project,x.task,"initialPlanningDate");
+    const label = plannedDate ? (daysFromToday(plannedDate) < 0 ? "Stage Overdue" : daysFromToday(plannedDate) === 0 ? "Stage Due Today" : daysFromToday(plannedDate) <= 7 ? "Stage Due This Week" : x.task.status) : x.task.status;
     return `<div class="mini-row">
       <div>
         <b>${esc(x.task.task)}</b>
         <div class="muted">${esc(x.project.name||"Project")} · ${esc(x.task.dept)}</div>
         <span class="pill">${esc(label)}</span>
       </div>
-      <span>${esc(x.task.dueDate||"-")}</span>
+      <span>${esc(formatDateDisplay(plannedDate)||"-")}</span>
     </div>`;
   }).join("") || `<p class="muted">No pending tasks found for this owner.</p>`;
 }
@@ -1337,8 +1520,9 @@ function renderProject(){
   document.getElementById("projectTitle").textContent=p.name || "Project";
   document.getElementById("projectSummary").innerHTML = [
     ["Project Name",p.name],["Job Code",p.jobCode],["Stage",getCurrentStage(p).split(" / ")[0]],["Sub Stage",getCurrentStage(p).split(" / ")[1]||"-"],
-    ["Due Date",formatDateDisplay(p.targetDate)],["Status",p.overallStatus],["RMC Budget",p.rmcBudget],["Freight Value",p.freightValue],["Site Expenses",p.siteExpenses],["Contractor Budget",p.contractorBudget],["Technology & Capacity",p.technology],["Location",p.location]
+    ["Project Target Date",formatDateDisplay(p.targetDate)],["Status",p.overallStatus],["RMC Budget",p.rmcBudget],["Freight Value",p.freightValue],["Site Expenses",p.siteExpenses],["Contractor Budget",p.contractorBudget],["Technology & Capacity",p.technology],["Location",p.location]
   ].map(x=>`<div class="kpi"><div class="lbl">${x[0]}</div><div style="font-weight:800;margin-top:5px">${esc(x[1]||"-")}</div></div>`).join("");
+  renderStageDateTable(p);
   const s=stats(p); p.overallStatus=s.completion===100?"Done":(s.progress>0||s.done>0?"In Progress":"To Do");
   document.getElementById("pCompletion").textContent=s.completion+"%"; document.getElementById("pTodo").textContent=s.todo; document.getElementById("pProgress").textContent=s.progress; document.getElementById("pDone").textContent=s.done;
   const filterDeptEl = document.getElementById("filterDept");
@@ -1351,15 +1535,13 @@ function renderProject(){
     const searchBlob = (t.task+t.stage+t.sub+t.owner+dLabel+(t.technicalTask||"")).toLowerCase();
     return (!fd || t.dept===fd || dLabel===fd) && (!fs || t.status===fs) && (!ft || searchBlob.includes(ft));
   });
-  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Initial Planning Date</th><th>Actual Date</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Due Date</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
+  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
   let lastStage="", lastSub="";
   tasks.forEach(t=>{
-    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="26">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
-    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="26">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
+    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="23">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
+    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="23">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
     html+=`<tr>
       <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.initialPlanningDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','initialPlanningDate',this.value)"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.actualDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualDate',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.planning||"")}" onchange="updateTaskField('${p.id}','${t.id}','planning',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.visitorPerson||"")}" onchange="updateTaskField('${p.id}','${t.id}','visitorPerson',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.siteReport||"")}" onchange="updateTaskField('${p.id}','${t.id}','siteReport',this.value)"></td>
@@ -1373,7 +1555,6 @@ function renderProject(){
       <td><input class="inline-input" value="${escAttr(t.actualBilling||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualBilling',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.collection||"")}" onchange="updateTaskField('${p.id}','${t.id}','collection',this.value)"></td>
       <td><input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.dueDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)"></td>
       <td><select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
       <td>${esc(t.remarks||"")}</td><td>${esc(t.delayReason||"")}</td><td>${esc(t.lastUpdated||"")}</td>
       <td><button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button></td>
@@ -1390,8 +1571,6 @@ function renderProject(){
         <div class="muted">${esc(t.stage)} → ${esc(t.sub)} · ${esc(t.dept)}</div>
         <label>Owner</label>
         <input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())">
-        <label>Due Date</label>
-        <input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(t.dueDate)||"")}" onchange="updateTaskField('${p.id}','${t.id}','dueDate',this.value)">
         <label>Status</label>
         <select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select>
         <div class="row" style="margin-top:8px">
@@ -1450,14 +1629,13 @@ function addGlobalActivity(project, task, action, details){
 function updateTaskField(projectId, taskId, field, value){
   const p=db.projects.find(x=>x.id===projectId); if(!p) return;
   const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
-  if(["dueDate","initialPlanningDate","actualDate","targetDate","startDate"].includes(field)) value = normalizeDateForInput(value);
   if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
-  if((field==="owner" || field==="dueDate") && !(currentUserRole==="Admin" || currentUserRole==="PM")){ alert("Only Admin/PM can change owner or due date."); renderProject(); return; }
+  if(field==="owner" && !(currentUserRole==="Admin" || currentUserRole==="PM")){ alert("Only Admin/PM can change owner."); renderProject(); return; }
   const oldValue=t[field] || "";
   if(oldValue === value) return;
   t[field]=value;
   t.lastUpdated=new Date().toLocaleString();
-  const labelMap={status:"Status", owner:"Owner", dueDate:"Due Date"};
+  const labelMap={status:"Status", owner:"Owner"};
   const details=`${labelMap[field]||field} changed from "${oldValue}" to "${value}"`;
   addHistory(t,"Updated",details);
   addGlobalActivity(p,t,"Task Updated",details);
@@ -1468,11 +1646,13 @@ function saveProject(id){
   if(id){ 
     const existing=db.projects.find(p=>p.id===id);
     Object.assign(existing, data);
+    ensureStageDates(existing);
     addGlobalActivity(existing, {id:"", task:"Project details"}, "Project Updated", "Project details updated");
   }
   else{
-    const newProject={id:uid(),...data,tasks:[]};
+    const newProject={id:uid(),...data,tasks:[],stageDates:{}};
     newProject.tasks=WORKFLOW_TEMPLATE.map(t => createWorkflowTaskFromTemplate(t, newProject, "Task created from workflow template"));
+    ensureStageDates(newProject);
     db.projects.push(newProject);
     addGlobalActivity(newProject, {id:"", task:"Project created"}, "Project Created", "New project created with workflow template");
   }
@@ -1488,9 +1668,7 @@ function openTaskForm(taskId){
     ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)} ${field("Technical Task","technicalTask",t.technicalTask)} 
     <div><label>Department</label><select id="f_dept">${DEPARTMENTS.map(d=>`<option ${t.dept===d?"selected":""}>${d}</option>`).join("")}</select></div>
     <div style="grid-column:1/-1"><label>Task</label><textarea id="f_task">${esc(t.task||"")}</textarea></div>
-    ${field("Owner","owner",t.owner)} ${field("Due Date","dueDate",t.dueDate,"date")}
-    ${field("Initial Planning Date","initialPlanningDate",t.initialPlanningDate,"date")}
-    ${field("Actual Date","actualDate",t.actualDate,"date")}
+    ${field("Owner","owner",t.owner)}
     ${field("Planning","planning",t.planning)}
     ${field("Visitor Person","visitorPerson",t.visitorPerson)}
     ${field("Site Report","siteReport",t.siteReport)}
@@ -1511,11 +1689,11 @@ function openTaskForm(taskId){
 }
 function saveTask(id){
   const p=db.projects.find(x=>x.id===currentProjectId);
-  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),dueDate:v("dueDate"),initialPlanningDate:v("initialPlanningDate"),actualDate:v("actualDate"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
+  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
   if(id){
     const task=p.tasks.find(t=>t.id===id);
     const changes=[];
-    ["stage","sub","dept","task","owner","dueDate","status","remarks","delayReason"].forEach(k=>{
+    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
       if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
     });
     Object.assign(task, data);
@@ -1608,8 +1786,8 @@ function getMISRows(){
         task:t.task||"",
         owner:t.owner||"",
         taskStatus:t.status||"",
-        initialPlanningDate:formatDateDisplay(t.initialPlanningDate)||"",
-        actualDate:formatDateDisplay(t.actualDate)||"",
+        initialPlanningDate:formatDateDisplay(stageDateForTask(p,t,"initialPlanningDate"))||"",
+        actualDate:formatDateDisplay(stageDateForTask(p,t,"actualDate"))||"",
         siteMom,
         quality,
         correspondence,
@@ -1639,7 +1817,7 @@ function renderMIS(){
   setText("misBudgetDeviation", rows.filter(r=>r.budgetDeviation && !["Pending","No Deviation"].includes(r.budgetDeviation)).length);
   setText("misBillingPending", rows.filter(r=>r.billingStatus==="Pending").length);
   setText("misCollectionPending", rows.filter(r=>r.collectionStatus==="Pending").length);
-  let html=`<tr><th>Project</th><th>Job Code</th><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Owner</th><th>Initial Planning Date</th><th>Actual Date</th><th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th></tr>`;
+  let html=`<tr><th>Project</th><th>Job Code</th><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Owner</th><th>Stage Planned Date</th><th>Stage Actual Date</th><th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th></tr>`;
   html += rows.map(r=>`<tr>
     <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.stage)}</td><td>${esc(r.sub)}</td><td>${esc(r.department)}</td><td>${esc(r.task)}</td><td>${esc(r.owner)}</td>
     <td>${esc(r.initialPlanningDate)}</td><td>${esc(r.actualDate)}</td><td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
@@ -1652,19 +1830,19 @@ function exportMISCSV(){
   const st=document.getElementById("misStatusFilter")?.value||"";
   let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
   if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
-  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Initial Planning Date","Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
+  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
   rows.forEach(r=>csvRows.push([r.projectName,r.jobCode,r.client,r.stage,r.sub,r.department,r.task,r.owner,r.taskStatus,r.initialPlanningDate,r.actualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback]));
   downloadFile("all-projects-mis-summary.csv", csv(csvRows), "text/csv");
 }
 
 function exportProjectCSV(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
-  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Department","Task","Owner","Due Date","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,t.dept,t.task,t.owner,t.dueDate,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
+  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
   downloadFile(`${p.name||"project"}-tracker.csv`, csv(rows), "text/csv");
 }
 function exportAllCSV(){
-  const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Department","Task","Owner","Due Date","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
-  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,t.dept,t.task,t.owner,t.dueDate,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
+  const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
+  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
   downloadFile("all-projects-tracker.csv", csv(rows), "text/csv");
 }
 function testFirebaseWrite(){
@@ -1779,7 +1957,9 @@ function projectMISRow(p){
   const tasks = Array.isArray(p.tasks) ? p.tasks : [];
   const total = tasks.length || 0;
   const done = tasks.filter(t=>t.status==="Done").length;
-  const overdue = tasks.filter(t=>typeof isOverdueTask==="function" ? isOverdueTask(t) : false).length;
+  ensureStageDates(p);
+  const stageGroups = getProjectStageGroups(p);
+  const overdue = stageGroups.filter(g=>isStageOverdue(p,g)).length;
   const completion = total ? Math.round(done*100/total) : 0;
 
   const siteReportCount = countWithValue(tasks, ["siteReport","momReport","siteVisitReport"]);
@@ -1805,11 +1985,11 @@ function projectMISRow(p){
     totalTasks: total,
     overdueTasks: overdue,
 
-    // Exact date logic:
-    // Initial Planning Date = earliest task Initial Planning Date in the project
-    // Actual Date = latest task Actual Date in the project
-    initialPlanningDate: getEarliestDate(tasks, ["initialPlanningDate"]) || "Not Updated",
-    actualDate: getLatestDate(tasks, ["actualDate"]) || "Not Updated",
+    // Stage date logic:
+    // Stage Planned Date = earliest stage planned date in the project
+    // Stage Actual Date = latest stage actual date in the project
+    initialPlanningDate: formatDateDisplay(getEarliestStageDate(p,"initialPlanningDate")) || "Not Updated",
+    actualDate: formatDateDisplay(getLatestStageDate(p,"actualDate")) || "Not Updated",
 
     siteVisitsMomReportStatus: siteReportCount ? `${siteReportCount}/${total} updated` : "Not Updated",
     qualityChecksStatus: qualityCheckCount ? `${qualityCheckCount}/${total} updated` : "Not Updated",
@@ -1836,8 +2016,8 @@ function renderMISDashboard(){
     <div class="grid grid-4">
       <div class="kpi"><div class="lbl">Total Projects</div><div class="num">${rows.length}</div></div>
       <div class="kpi"><div class="lbl">Delayed Projects</div><div class="num">${delayed}</div></div>
-      <div class="kpi"><div class="lbl">Initial Date Missing</div><div class="num">${notUpdated("initialPlanningDate")}</div></div>
-      <div class="kpi"><div class="lbl">Actual Date Missing</div><div class="num">${notUpdated("actualDate")}</div></div>
+      <div class="kpi"><div class="lbl">Stage Planned Date Missing</div><div class="num">${notUpdated("initialPlanningDate")}</div></div>
+      <div class="kpi"><div class="lbl">Stage Actual Date Missing</div><div class="num">${notUpdated("actualDate")}</div></div>
       <div class="kpi"><div class="lbl">MOM / Site Report Missing</div><div class="num">${notUpdated("siteVisitsMomReportStatus")}</div></div>
       <div class="kpi"><div class="lbl">Quality Check Missing</div><div class="num">${notUpdated("qualityChecksStatus")}</div></div>
       <div class="kpi"><div class="lbl">Billing Missing</div><div class="num">${notUpdated("billingStatus")}</div></div>
@@ -1848,7 +2028,7 @@ function renderMISDashboard(){
       <div class="toolbar">
         <div>
           <h2 style="margin:0">Project-wise MIS Summary</h2>
-          <p class="mis-note">One row per project. Initial Planning Date is earliest task planning date. Actual Date is latest task actual date. Format: DD-MMM-YYYY.</p>
+          <p class="mis-note">One row per project. Planned/actual dates are taken from stage-wise dates, not individual tasks. Format: DD-MMM-YYYY.</p>
         </div>
         <button class="blue" onclick="exportMISCSV()">Export Project-wise MIS CSV</button>
       </div>
@@ -1863,9 +2043,9 @@ function renderMISDashboard(){
             <th>Completion</th>
             <th>Health</th>
             <th>Current Stage</th>
-            <th>Overdue Tasks</th>
-            <th>Initial Planning Date</th>
-            <th>Actual Date</th>
+            <th>Overdue Stages</th>
+            <th>Stage Planned Date</th>
+            <th>Stage Actual Date</th>
             <th>Site Visits / M.O.M Report Status</th>
             <th>Quality Checks Status</th>
             <th>Correspondence</th>
@@ -1914,9 +2094,9 @@ function exportMISCSV(){
     "Completion",
     "Health",
     "Current Stage",
-    "Overdue Tasks",
-    "Initial planning date",
-    "Actual date",
+    "Overdue Stages",
+    "Stage Planned Date",
+    "Stage Actual Date",
     "Site visits/ M.O.M Report status",
     "Quality Checks status",
     "Correspondence",
