@@ -17,6 +17,8 @@
     header p{margin:4px 0 0;color:#dff7f4;font-size:13px}
     .wrap{max-width:1500px;margin:0 auto;padding:22px}
     .hidden{display:none!important}
+    #modal.hidden{display:none!important;pointer-events:none!important}
+    #modal:not(.hidden){pointer-events:auto!important}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow);margin-bottom:18px}
     .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
     .grid{display:grid;gap:14px}
@@ -105,12 +107,6 @@
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
-
-
-    /* Fail-safe: modal must not block page clicks unless explicitly opened */
-    #modal.hidden{display:none!important;pointer-events:none!important}
-    #modal:not(.hidden){display:flex!important;pointer-events:auto!important}
-    .tabs .tab, button{pointer-events:auto}
   </style>
 </head>
 <body>
@@ -716,41 +712,12 @@ function normalizeDateFields(obj){
 }
 
 function normalizeAllDates(){
-  normalizeDB();
   (db.projects||[]).forEach(p=>{
     normalizeDateFields(p);
     ensureStageDates(p);
     (p.tasks||[]).forEach(t=>{
       normalizeDateFields(t);
       clearTaskLevelDateFields(t);
-    });
-  });
-}
-
-function safeText(value){
-  return String(value ?? "");
-}
-
-function normalizeDB(){
-  if(!db || typeof db !== "object") db = { projects: [], users: {}, activity: [] };
-  if(!Array.isArray(db.projects)){
-    db.projects = Object.values(db.projects || {}).filter(x => x && typeof x === "object");
-  }
-  if(!Array.isArray(db.activity)){
-    db.activity = Object.values(db.activity || {}).filter(x => x && typeof x === "object");
-  }
-  if(!db.users || typeof db.users !== "object" || Array.isArray(db.users)) db.users = {};
-  db.projects.forEach(project => {
-    if(!project || typeof project !== "object") return;
-    if(!project.id) project.id = uid();
-    if(!Array.isArray(project.tasks)){
-      project.tasks = Object.values(project.tasks || {}).filter(x => x && typeof x === "object");
-    }
-    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-    project.tasks.forEach(task => {
-      if(!task.id) task.id = uid();
-      if(!task.status) task.status = "To Do";
-      if(!Array.isArray(task.history)) task.history = [];
     });
   });
 }
@@ -1093,7 +1060,6 @@ let dbListenerStarted = false;
 let dbSeedingUsers = false;
 
 function save(){
-  normalizeDB();
   ensureUsers();
   normalizeAllDates();
 
@@ -1166,7 +1132,6 @@ function load(){
   const localCopy = localStorage.getItem("projectTrackerDB");
   if(localCopy){
     try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [], users: {} }; }
-    normalizeDB();
   }
 
   if(firebaseReady && firebaseDBRef){
@@ -1176,7 +1141,8 @@ function load(){
 
       if(remoteData === null) {
         if(!db || typeof db !== "object") db = { projects: [], users: {} };
-        normalizeDB();
+        if(!Array.isArray(db.projects)) db.projects = [];
+        if(!Array.isArray(db.activity)) db.activity = [];
         const changed = ensureUsers();
         normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db));
@@ -1190,7 +1156,8 @@ function load(){
         if(applyCurrentUserRoleFromDB()) renderAll();
       } else {
         db = remoteData || {};
-        normalizeDB();
+        if(!Array.isArray(db.projects)) db.projects = [];
+        if(!Array.isArray(db.activity)) db.activity = [];
         const changed = ensureUsers();
         normalizeAllDates();
         localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
@@ -1267,10 +1234,12 @@ function initAuthState(){
   });
 }
 
-function renderAll(){ normalizeDB(); ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
+function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
-function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); }
+function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
+  renderMISDashboard();
+}
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
 function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
@@ -1286,14 +1255,11 @@ function isDueThisWeekTask(t){ return false; }
 function isCriticalTask(t){ return String(t.critical || "").toLowerCase() === "yes" || String(t.priority || "").toLowerCase() === "critical"; }
 
 function stats(p){
-  if(!p) p = {tasks:[]};
-  if(!Array.isArray(p.tasks)) p.tasks = [];
   ensureStageDates(p);
-  const tasks = p.tasks || [];
-  const total=tasks.length;
-  const done=tasks.filter(t=>t.status==="Done").length;
-  const progress=tasks.filter(t=>t.status==="In Progress").length;
-  const todo=tasks.filter(t=>t.status==="To Do").length;
+  const total=p.tasks.length;
+  const done=p.tasks.filter(t=>t.status==="Done").length;
+  const progress=p.tasks.filter(t=>t.status==="In Progress").length;
+  const todo=p.tasks.filter(t=>t.status==="To Do").length;
   const stageGroups=getProjectStageGroups(p);
   const overdue=stageGroups.filter(g=>isStageOverdue(p,g)).length;
   const dueToday=stageGroups.filter(g=>isStageDueToday(p,g)).length;
@@ -1361,11 +1327,10 @@ function renderDashboard(){
   const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
   const list=document.getElementById("projectsList"); if(!list) return;
 
-  normalizeDB();
-  const allStats = (db.projects||[]).map(p=>({p, s:stats(p)}));
-  const filtered=(db.projects||[]).filter(p=>[p.name,p.client,p.jobCode,p.location,p.manager].map(safeText).join(" ").toLowerCase().includes(q));
+  const allStats = db.projects.map(p=>({p, s:stats(p)}));
+  const filtered=db.projects.filter(p=>(p.name+p.client+p.jobCode+p.location+p.manager).toLowerCase().includes(q));
 
-  const totalProjects=(db.projects||[]).length;
+  const totalProjects=db.projects.length;
   const completedProjects=allStats.filter(x=>x.s.completion===100).length;
   const delayedProjects=allStats.filter(x=>x.s.overdue>0).length;
   const onTrack=allStats.filter(x=>x.s.overdue===0 && x.s.completion<100).length;
@@ -1449,24 +1414,14 @@ function renderDepartmentDashboard(){
   const el=document.getElementById("deptDashboard"); if(!el) return;
   const data={};
   DEPARTMENTS.forEach(d=>data[d]={total:0,todo:0,progress:0,done:0,overdue:0});
-  (db.projects||[]).forEach(p=>{
-    if(!Array.isArray(p.tasks)) p.tasks = [];
-    (p.tasks||[]).forEach(t=>{
-      if(!data[t.dept]) data[t.dept]={total:0,todo:0,progress:0,done:0,overdue:0};
-      data[t.dept].total++;
-      if(t.status==="Done") data[t.dept].done++;
-      else if(t.status==="In Progress") data[t.dept].progress++;
-      else data[t.dept].todo++;
-    });
-    getProjectStageGroups(p).forEach(g=>{
-      const tasks = getStageTasks(p, g.stage, g.sub);
-      if(!tasks.length || !isStageOverdue(p,g)) return;
-      [...new Set(tasks.map(t=>t.dept).filter(Boolean))].forEach(dept=>{
-        if(!data[dept]) data[dept]={total:0,todo:0,progress:0,done:0,overdue:0};
-        data[dept].overdue++;
-      });
-    });
-  });
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
+    if(!data[t.dept]) data[t.dept]={total:0,todo:0,progress:0,done:0,overdue:0};
+    data[t.dept].total++;
+    if(t.status==="Done") data[t.dept].done++;
+    else if(t.status==="In Progress") data[t.dept].progress++;
+    else data[t.dept].todo++;
+    if(isOverdueTask(t)) data[t.dept].overdue++;
+  }));
   el.innerHTML = Object.entries(data).map(([dept,d])=>{
     const comp=d.total?Math.round(d.done*100/d.total):0;
     return `<div class="mini-row">
@@ -1483,7 +1438,7 @@ function renderDepartmentDashboard(){
 function renderAlertsDashboard(){
   const el=document.getElementById("alertDashboard"); if(!el) return;
   const alerts=[];
-  (db.projects||[]).forEach(project=>{
+  db.projects.forEach(project=>{
     ensureStageDates(project);
     getProjectStageGroups(project).forEach(group=>{
       const rec = getStageDateRecord(project, group.stage, group.sub);
@@ -1503,7 +1458,7 @@ function renderAlertsDashboard(){
 function renderNotificationDashboard(){
   const el=document.getElementById("notificationDashboard"); if(!el) return;
   const notifications=[];
-  (db.projects||[]).forEach(project=>{
+  db.projects.forEach(project=>{
     ensureStageDates(project);
     (project.tasks||[]).forEach(task=>{
       if(task.status==="Done") return;
@@ -1534,7 +1489,7 @@ function renderMyTasksDashboard(owner){
     return;
   }
   const tasks=[];
-  (db.projects||[]).forEach(p=>(p.tasks||[]).forEach(t=>{
+  db.projects.forEach(p=>p.tasks.forEach(t=>{
     if(String(t.owner||"").toLowerCase().includes(owner) && t.status!=="Done") tasks.push({project:p, task:t});
   }));
   tasks.sort((a,b)=>(stageDateForTask(a.project,a.task,"initialPlanningDate")||"9999-12-31").localeCompare(stageDateForTask(b.project,b.task,"initialPlanningDate")||"9999-12-31"));
@@ -1563,8 +1518,7 @@ function departmentLabel(t){
 }
 
 function renderProject(){
-  normalizeDB();
-  const p=(db.projects||[]).find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
+  const p=db.projects.find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
   document.getElementById("projectTitle").textContent=p.name || "Project";
   document.getElementById("projectSummary").innerHTML = [
     ["Project Name",p.name],["Job Code",p.jobCode],["Stage",getCurrentStage(p).split(" / ")[0]],["Sub Stage",getCurrentStage(p).split(" / ")[1]||"-"],
@@ -1575,13 +1529,12 @@ function renderProject(){
   document.getElementById("pCompletion").textContent=s.completion+"%"; document.getElementById("pTodo").textContent=s.todo; document.getElementById("pProgress").textContent=s.progress; document.getElementById("pDone").textContent=s.done;
   const filterDeptEl = document.getElementById("filterDept");
   const selectedDept = filterDeptEl.value || "";
-  if(!Array.isArray(p.tasks)) p.tasks = [];
   const deptOptions = [...new Set([...DEPARTMENTS, ...p.tasks.map(t=>departmentLabel(t)).filter(Boolean)])];
   filterDeptEl.innerHTML = '<option value="">All Departments</option>' + deptOptions.map(d=>`<option value="${escAttr(d)}" ${selectedDept===d?"selected":""}>${esc(d)}</option>`).join("");
   const fd=filterDeptEl.value, fs=document.getElementById("filterStatus").value, ft=(document.getElementById("filterText").value||"").toLowerCase();
   let tasks=p.tasks.filter(t=>{
     const dLabel = departmentLabel(t);
-    const searchBlob = [t.task,t.stage,t.sub,t.owner,dLabel,t.technicalTask].map(safeText).join(" ").toLowerCase();
+    const searchBlob = (t.task+t.stage+t.sub+t.owner+dLabel+(t.technicalTask||"")).toLowerCase();
     return (!fd || t.dept===fd || dLabel===fd) && (!fs || t.status===fs) && (!ft || searchBlob.includes(ft));
   });
   let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
@@ -1739,7 +1692,6 @@ function openTaskForm(taskId){
 function saveTask(id){
   const p=db.projects.find(x=>x.id===currentProjectId);
   const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
-  clearTaskLevelDateFields(data);
   if(id){
     const task=p.tasks.find(t=>t.id===id);
     const changes=[];
@@ -1892,7 +1844,7 @@ function exportProjectCSV(){
 }
 function exportAllCSV(){
   const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
-  (db.projects||[]).forEach(p=>(p.tasks||[]).forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
+  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
   downloadFile("all-projects-tracker.csv", csv(rows), "text/csv");
 }
 function testFirebaseWrite(){
@@ -1918,103 +1870,512 @@ function restoreBackup(e){
 function downloadFile(name, content, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
 }
+// initAuthState moved to end after emergency safety patch
 
 
-/* ========= CLICK / DASHBOARD FAIL-SAFE PATCH =========
-   This patch keeps navigation buttons working even if one dashboard render throws an error.
-   It does not delete or reset Firebase data.
-*/
-function trackerSafeRun(label, fn){
-  try { return fn(); }
-  catch(error){
-    console.error("Project Tracker error in " + label, error);
-    const msg = "A dashboard section had an error, but navigation is still active. Open browser console for details: " + (error && error.message ? error.message : error);
-    const box = document.getElementById("loginError");
-    if(box && !document.getElementById("app")?.classList.contains("hidden")) box.textContent = msg;
-    return null;
+
+
+
+
+/* ===== STRICT MIS DATE HELPERS ===== */
+function parseMISDate(value){
+  if(!value) return null;
+  const s = String(value).trim();
+  if(!s) return null;
+
+  // HTML date input format: YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+
+  // Indian date format: DD/MM/YYYY or DD-MM-YYYY
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m) return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]));
+
+  // DD-MMM-YYYY
+  m = s.match(/^(\d{1,2})[-\s]([A-Za-z]{3,})[-\s](\d{4})$/);
+  if(m){
+    const months={jan:0,january:0,feb:1,february:1,mar:2,march:2,apr:3,april:3,may:4,jun:5,june:5,jul:6,july:6,aug:7,august:7,sep:8,sept:8,september:8,oct:9,october:9,nov:10,november:10,dec:11,december:11};
+    const mon=months[m[2].toLowerCase()];
+    if(mon!==undefined) return new Date(Number(m[3]), mon, Number(m[1]));
   }
+
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
 }
-function trackerEl(id){ return document.getElementById(id); }
-function trackerHide(id){ const el=trackerEl(id); if(el) el.classList.add("hidden"); }
-function trackerShow(id){ const el=trackerEl(id); if(el) el.classList.remove("hidden"); }
-function trackerSetTabSafe(id){
-  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
-  const el = trackerEl(id);
-  if(el) el.classList.add("active");
+
+function formatMISDate(value){
+  const d = parseMISDate(value);
+  if(!d) return "";
+  const dd = String(d.getDate()).padStart(2,"0");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${dd}-${months[d.getMonth()]}-${d.getFullYear()}`;
 }
-function trackerHideAllViews(){ ["dashboardView","projectView","misView","setupView"].forEach(trackerHide); }
-function trackerEnsureProjectSelected(){
-  if(!currentProjectId && Array.isArray(db.projects) && db.projects.length) currentProjectId = db.projects[0].id;
+
+function getEarliestDate(tasks, keys){
+  const dates=[];
+  tasks.forEach(t=>{
+    keys.forEach(k=>{
+      const d=parseMISDate(t[k]);
+      if(d) dates.push(d);
+    });
+  });
+  if(!dates.length) return "";
+  dates.sort((a,b)=>a-b);
+  return formatMISDate(`${dates[0].getFullYear()}-${String(dates[0].getMonth()+1).padStart(2,"0")}-${String(dates[0].getDate()).padStart(2,"0")}`);
 }
-window.showDashboard = function(){
-  trackerSetTabSafe("dashboardTab");
-  trackerHideAllViews();
-  trackerShow("dashboardView");
-  trackerSafeRun("Dashboard", function(){ normalizeDB(); renderDashboard(); });
-};
-window.showProjectView = function(){
-  trackerSetTabSafe("projectTab");
-  trackerHideAllViews();
-  trackerShow("projectView");
-  trackerSafeRun("Project View", function(){ normalizeDB(); trackerEnsureProjectSelected(); renderProject(); });
-};
-window.showMIS = function(){
-  trackerSetTabSafe("misTab");
-  trackerHideAllViews();
-  trackerShow("misView");
-  trackerSafeRun("MIS Summary", function(){ normalizeDB(); renderMIS(); });
-};
-window.showSetup = function(){
-  trackerSetTabSafe("setupTab");
-  trackerHideAllViews();
-  trackerShow("setupView");
-};
-window.logout = function(){
-  trackerSafeRun("Logout", function(){
-    if(firebaseReady && window.firebase && firebase.auth){
-      firebase.auth().signOut().finally(function(){ location.reload(); });
-    } else {
-      location.reload();
+
+function getLatestDate(tasks, keys){
+  const dates=[];
+  tasks.forEach(t=>{
+    keys.forEach(k=>{
+      const d=parseMISDate(t[k]);
+      if(d) dates.push(d);
+    });
+  });
+  if(!dates.length) return "";
+  dates.sort((a,b)=>b-a);
+  return formatMISDate(`${dates[0].getFullYear()}-${String(dates[0].getMonth()+1).padStart(2,"0")}-${String(dates[0].getDate()).padStart(2,"0")}`);
+}
+/* ===== END STRICT MIS DATE HELPERS ===== */
+
+
+/* ===== CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
+function taskHasValue(t, keys){
+  return keys.some(k => String(t[k] ?? "").trim() !== "");
+}
+function latestNonEmpty(tasks, keys){
+  for(const t of tasks){
+    for(const k of keys){
+      const v = String(t[k] ?? "").trim();
+      if(v) return v;
     }
+  }
+  return "";
+}
+function countWithValue(tasks, keys){
+  return tasks.filter(t => taskHasValue(t, keys)).length;
+}
+function projectMISRow(p){
+  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
+  const total = tasks.length || 0;
+  const done = tasks.filter(t=>t.status==="Done").length;
+  ensureStageDates(p);
+  const stageGroups = getProjectStageGroups(p);
+  const overdue = stageGroups.filter(g=>isStageOverdue(p,g)).length;
+  const completion = total ? Math.round(done*100/total) : 0;
+
+  const siteReportCount = countWithValue(tasks, ["siteReport","momReport","siteVisitReport"]);
+  const qualityCheckCount = countWithValue(tasks, ["qualityCheckReport","checkPoints","checkingPerson"]);
+  const correspondenceCount = countWithValue(tasks, ["monthlyCorrespondence","correspondence"]);
+  const expenseCount = countWithValue(tasks, ["expensesIncurred","expense"]);
+  const billingCount = countWithValue(tasks, ["actualBilling","plannedBilling","billingStatus"]);
+  const collectionCount = countWithValue(tasks, ["collection","collectionStatus"]);
+
+  const totalBudget = tasks.reduce((sum,t)=>sum + (parseFloat(String(t.budget||"").replace(/,/g,"")) || 0), 0);
+  const totalExpense = tasks.reduce((sum,t)=>sum + (parseFloat(String(t.expensesIncurred||t.expense||"").replace(/,/g,"")) || 0), 0);
+  const budgetDeviation = (totalBudget || totalExpense) ? (totalExpense - totalBudget) : "";
+
+  return {
+    projectName: p.name || "",
+    jobCode: p.jobCode || "",
+    client: p.client || "",
+    projectManager: p.manager || "",
+    status: p.overallStatus || "",
+    completion: completion + "%",
+    health: typeof stats==="function" ? stats(p).health : (overdue ? "Delayed" : "On Track"),
+    currentStage: typeof getCurrentStage==="function" ? getCurrentStage(p) : "",
+    totalTasks: total,
+    overdueTasks: overdue,
+
+    // Stage date logic:
+    // Stage Planned Date = earliest stage planned date in the project
+    // Stage Actual Date = latest stage actual date in the project
+    initialPlanningDate: formatDateDisplay(getEarliestStageDate(p,"initialPlanningDate")) || "Not Updated",
+    actualDate: formatDateDisplay(getLatestStageDate(p,"actualDate")) || "Not Updated",
+
+    siteVisitsMomReportStatus: siteReportCount ? `${siteReportCount}/${total} updated` : "Not Updated",
+    qualityChecksStatus: qualityCheckCount ? `${qualityCheckCount}/${total} updated` : "Not Updated",
+    correspondence: correspondenceCount ? `${correspondenceCount}/${total} updated` : "Not Updated",
+    expense: expenseCount ? `${expenseCount}/${total} updated` : "Not Updated",
+    budgetDeviation: budgetDeviation === "" ? "Not Updated" : budgetDeviation,
+    billingStatus: billingCount ? `${billingCount}/${total} updated` : "Not Updated",
+    collectionStatus: collectionCount ? `${collectionCount}/${total} updated` : "Not Updated",
+    customerFeedback: latestNonEmpty(tasks, ["customerFeedback","clientFeedback","feedback"]) || "Not Updated"
+  };
+}
+function getMISProjectRows(){
+  return (db.projects || []).map(projectMISRow);
+}
+function renderMISDashboard(){
+  const container = document.getElementById("misView") || document.getElementById("misDashboard") || document.getElementById("misSummaryView");
+  if(!container) return;
+
+  const rows = getMISProjectRows();
+  const notUpdated = (field) => rows.filter(r => String(r[field]||"").toLowerCase()==="not updated").length;
+  const delayed = rows.filter(r => (parseInt(r.overdueTasks)||0)>0).length;
+
+  container.innerHTML = `
+    <div class="grid grid-4">
+      <div class="kpi"><div class="lbl">Total Projects</div><div class="num">${rows.length}</div></div>
+      <div class="kpi"><div class="lbl">Delayed Projects</div><div class="num">${delayed}</div></div>
+      <div class="kpi"><div class="lbl">Stage Planned Date Missing</div><div class="num">${notUpdated("initialPlanningDate")}</div></div>
+      <div class="kpi"><div class="lbl">Stage Actual Date Missing</div><div class="num">${notUpdated("actualDate")}</div></div>
+      <div class="kpi"><div class="lbl">MOM / Site Report Missing</div><div class="num">${notUpdated("siteVisitsMomReportStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Quality Check Missing</div><div class="num">${notUpdated("qualityChecksStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Billing Missing</div><div class="num">${notUpdated("billingStatus")}</div></div>
+      <div class="kpi"><div class="lbl">Collection Missing</div><div class="num">${notUpdated("collectionStatus")}</div></div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <div>
+          <h2 style="margin:0">Project-wise MIS Summary</h2>
+          <p class="mis-note">One row per project. Planned/actual dates are taken from stage-wise dates, not individual tasks. Format: DD-MMM-YYYY.</p>
+        </div>
+        <button class="blue" onclick="exportMISCSV()">Export Project-wise MIS CSV</button>
+      </div>
+      <div class="table-scroll" style="margin-top:12px">
+        <table>
+          <tr>
+            <th>Project Name</th>
+            <th>Job Code</th>
+            <th>Client</th>
+            <th>Project Manager</th>
+            <th>Status</th>
+            <th>Completion</th>
+            <th>Health</th>
+            <th>Current Stage</th>
+            <th>Overdue Stages</th>
+            <th>Stage Planned Date</th>
+            <th>Stage Actual Date</th>
+            <th>Site Visits / M.O.M Report Status</th>
+            <th>Quality Checks Status</th>
+            <th>Correspondence</th>
+            <th>Expense</th>
+            <th>Budget Deviation</th>
+            <th>Billing Status</th>
+            <th>Collection Status</th>
+            <th>Customer Feedback</th>
+          </tr>
+          ${rows.map(r=>`
+            <tr>
+              <td>${esc(r.projectName)}</td>
+              <td>${esc(r.jobCode)}</td>
+              <td>${esc(r.client)}</td>
+              <td>${esc(r.projectManager)}</td>
+              <td>${esc(r.status)}</td>
+              <td>${esc(r.completion)}</td>
+              <td>${esc(r.health)}</td>
+              <td>${esc(r.currentStage)}</td>
+              <td>${esc(r.overdueTasks)}</td>
+              <td>${esc(r.initialPlanningDate)}</td>
+              <td>${esc(r.actualDate)}</td>
+              <td>${esc(r.siteVisitsMomReportStatus)}</td>
+              <td>${esc(r.qualityChecksStatus)}</td>
+              <td>${esc(r.correspondence)}</td>
+              <td>${esc(r.expense)}</td>
+              <td>${esc(r.budgetDeviation)}</td>
+              <td>${esc(r.billingStatus)}</td>
+              <td>${esc(r.collectionStatus)}</td>
+              <td>${esc(r.customerFeedback)}</td>
+            </tr>
+          `).join("")}
+        </table>
+      </div>
+    </div>
+  `;
+}
+function exportMISCSV(){
+  const rows = getMISProjectRows();
+  const headers = [
+    "Project Name",
+    "Job Code",
+    "Client",
+    "Project Manager",
+    "Status",
+    "Completion",
+    "Health",
+    "Current Stage",
+    "Overdue Stages",
+    "Stage Planned Date",
+    "Stage Actual Date",
+    "Site visits/ M.O.M Report status",
+    "Quality Checks status",
+    "Correspondence",
+    "Expense",
+    "Budget Deviation",
+    "Billing Status",
+    "Collection status",
+    "Customer feedback"
+  ];
+  const data = rows.map(r=>[
+    r.projectName,
+    r.jobCode,
+    r.client,
+    r.projectManager,
+    r.status,
+    r.completion,
+    r.health,
+    r.currentStage,
+    r.overdueTasks,
+    r.initialPlanningDate,
+    r.actualDate,
+    r.siteVisitsMomReportStatus,
+    r.qualityChecksStatus,
+    r.correspondence,
+    r.expense,
+    r.budgetDeviation,
+    r.billingStatus,
+    r.collectionStatus,
+    r.customerFeedback
+  ]);
+  downloadFile("project-wise-mis-summary.csv", csv([headers, ...data]), "text/csv");
+}
+/* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
+
+
+/* ===== EMERGENCY SAFE DATA + NAVIGATION PATCH v2026-07-06C =====
+   Data safety rules:
+   - Never convert existing projects/tasks to empty just because Firebase returns object maps.
+   - Never delete hidden old task date fields during stage-date migration.
+   - Never save an accidental 0-project/0-task state over known existing data.
+   - Keep dashboard tabs, logout and setup clickable even if one table render fails.
+*/
+let __lastKnownProjectCount = 0;
+let __lastKnownTaskCount = 0;
+let __allowDangerousEmptySave = false;
+
+function toSafeArray(value){
+  if(Array.isArray(value)) return value.filter(x => x && typeof x === "object");
+  if(value && typeof value === "object") return Object.values(value).filter(x => x && typeof x === "object");
+  return [];
+}
+function countProjectsIn(data){ return toSafeArray(data && data.projects).length; }
+function countTasksIn(data){ return toSafeArray(data && data.projects).reduce((sum,p)=>sum + toSafeArray(p && p.tasks).length, 0); }
+function rememberDataHealth(){
+  const pc = countProjectsIn(db);
+  const tc = countTasksIn(db);
+  if(pc > __lastKnownProjectCount) __lastKnownProjectCount = pc;
+  if(tc > __lastKnownTaskCount) __lastKnownTaskCount = tc;
+}
+function normalizeDBSafe(){
+  if(!db || typeof db !== "object") db = { projects: [], users: {}, activity: [] };
+  db.projects = toSafeArray(db.projects);
+  db.activity = toSafeArray(db.activity);
+  if(!db.users || typeof db.users !== "object" || Array.isArray(db.users)) db.users = {};
+  db.projects.forEach(project => {
+    if(!project.id) project.id = uid();
+    project.tasks = toSafeArray(project.tasks);
+    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+    project.tasks.forEach(task => {
+      if(!task.id) task.id = uid();
+      if(!task.stage) task.stage = "Stage Not Updated";
+      if(!task.sub) task.sub = "Sub-stage Not Updated";
+      if(!task.dept) task.dept = "Projects Team";
+      if(!task.task) task.task = "Task Not Updated";
+      if(!task.status) task.status = "To Do";
+      if(!Array.isArray(task.history)) task.history = toSafeArray(task.history);
+    });
+  });
+  rememberDataHealth();
+  return db;
+}
+
+ensureStageDates = function(project){
+  if(!project || typeof project !== "object") return {};
+  project.tasks = toSafeArray(project.tasks);
+  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+  const groups = getProjectStageGroups(project);
+  groups.forEach(group => {
+    const key = group.key;
+    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
+      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
+    }
+    const rec = project.stageDates[key];
+    rec.stage = group.stage;
+    rec.sub = group.sub;
+    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
+    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
+
+    const relatedTasks = getStageTasks(project, group.stage, group.sub);
+    if(!rec.initialPlanningDate){
+      const plannedDates = relatedTasks.map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate)).filter(Boolean).sort();
+      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
+    }
+    if(!rec.actualDate){
+      const actualDates = relatedTasks.map(t => normalizeDateForInput(t.actualDate)).filter(Boolean).sort();
+      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
+    }
+  });
+  return project.stageDates;
+};
+
+normalizeAllDates = function(){
+  normalizeDBSafe();
+  (db.projects || []).forEach(p => {
+    normalizeDateFields(p);
+    ensureStageDates(p);
+    (p.tasks || []).forEach(t => {
+      // UI/MIS ignore task-level dates, but old values stay in data for recovery/backward safety.
+      normalizeDateFields(t);
+    });
   });
 };
 
-window.addEventListener("error", function(event){
-  console.error("Global Project Tracker JS error:", event.error || event.message);
-});
+function safeBackupBeforeSave(){
+  try{
+    normalizeDBSafe();
+    localStorage.setItem("projectTrackerDB_last_before_save", JSON.stringify(db));
+    localStorage.setItem("projectTrackerDB_safety_" + new Date().toISOString().replace(/[:.]/g,"-"), JSON.stringify(db));
+  }catch(e){ console.warn("Safety backup failed", e); }
+}
+
+const __originalSave = save;
+save = function(){
+  normalizeDBSafe();
+  const currentProjects = countProjectsIn(db);
+  const currentTasks = countTasksIn(db);
+  if(!__allowDangerousEmptySave && __lastKnownProjectCount > 0 && currentProjects === 0){
+    alert("Save blocked for safety: current screen has 0 projects, but earlier data had projects. This prevents accidental Firebase overwrite. Refresh or restore backup instead.");
+    return;
+  }
+  if(!__allowDangerousEmptySave && __lastKnownTaskCount > 0 && currentProjects > 0 && currentTasks === 0){
+    alert("Save blocked for safety: projects are present but all tasks are missing. This prevents accidental task overwrite. Refresh or restore backup instead.");
+    return;
+  }
+  safeBackupBeforeSave();
+  return __originalSave();
+};
+
+load = function(){
+  if(dbListenerStarted) return;
+
+  let localData = null;
+  const localCopy = localStorage.getItem("projectTrackerDB");
+  if(localCopy){
+    try { localData = JSON.parse(localCopy); db = localData; normalizeDBSafe(); } catch(e) { localData = null; db = { projects: [], users: {}, activity: [] }; }
+  }
+
+  if(firebaseReady && firebaseDBRef){
+    dbListenerStarted = true;
+    firebaseDBRef.on("value", snapshot => {
+      const remoteData = snapshot.val();
+
+      if(remoteData === null) {
+        if(localData && countProjectsIn(localData) > 0) db = localData;
+        else if(!db || typeof db !== "object") db = { projects: [], users: {}, activity: [] };
+        normalizeDBSafe();
+        const changed = ensureUsers();
+        normalizeAllDates();
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+        if(firebase.auth().currentUser && (countProjectsIn(db) > 0 || changed)){
+          firebaseDBRef.set(db).catch(error => console.error("Initial database seed failed", error));
+        }
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase Shared Database - initialized safely";
+        if(applyCurrentUserRoleFromDB()) renderAll();
+      } else {
+        const remoteProjects = countProjectsIn(remoteData);
+        const localProjects = countProjectsIn(localData);
+        if(remoteProjects === 0 && localProjects > 0){
+          db = localData;
+          alert("Firebase returned 0 projects. The tracker is showing your browser backup instead to prevent data loss. Verify before saving.");
+        } else {
+          db = remoteData || {};
+        }
+        normalizeDBSafe();
+        const changed = ensureUsers();
+        normalizeAllDates();
+        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+        if(changed && !dbSeedingUsers && firebase.auth().currentUser){
+          dbSeedingUsers = true;
+          firebaseDBRef.child("users").set(db.users).finally(()=>{ dbSeedingUsers = false; });
+        }
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication - safe mode";
+        if(applyCurrentUserRoleFromDB()) renderAll();
+      }
+    }, error => {
+      console.error("Firebase load failed.", error);
+      const mode = document.getElementById("storageMode");
+      if(mode) mode.textContent = "Firebase load failed";
+      alert("Could not load Firebase data. Please check Realtime Database Rules and make sure you are logged in. Error: " + error.message);
+    });
+  } else {
+    normalizeDBSafe();
+    ensureUsers();
+    applyCurrentUserRoleFromDB();
+    renderAll();
+  }
+};
+
+function showAppMessage(message){
+  const target = document.getElementById("projectsList") || document.getElementById("dashboardView");
+  if(target) target.innerHTML = `<div class="card"><b>${esc(message)}</b></div>`;
+}
+function safeRender(label, fn){
+  try { normalizeDBSafe(); return fn(); }
+  catch(error){
+    console.error("Project Tracker render error in " + label, error);
+    showAppMessage("Dashboard section error: " + (error && error.message ? error.message : error));
+    return null;
+  }
+}
+
+const __originalRenderDashboard = renderDashboard;
+const __originalRenderProject = renderProject;
+const __originalRenderMIS = renderMIS;
+renderDashboard = function(){ return safeRender("Dashboard", () => __originalRenderDashboard()); };
+renderProject = function(){ return safeRender("Project", () => __originalRenderProject()); };
+renderMIS = function(){ return safeRender("MIS", () => __originalRenderMIS()); };
+renderMISDashboard = function(){ return renderMIS(); };
+
+renderAll = function(){
+  normalizeDBSafe();
+  ensureUsers();
+  applyMinorTaskUpdates();
+  updateUserProfileBox();
+  renderDashboard();
+  if(currentProjectId) renderProject();
+  if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS();
+};
+
+hideAll = function(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.add("hidden"); }); };
+setTab = function(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id && document.getElementById(id)) document.getElementById(id).classList.add("active"); };
+showDashboard = function(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); };
+showProjectView = function(){
+  setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden");
+  normalizeDBSafe();
+  if(!currentProjectId && db.projects.length) currentProjectId = db.projects[0].id;
+  renderProject();
+};
+showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
+showSetup = function(){ setTab("setupTab"); hideAll(); document.getElementById("setupView").classList.remove("hidden"); };
+logout = function(){
+  if(firebaseReady && firebase.auth){ firebase.auth().signOut().finally(()=>location.reload()); }
+  else { location.reload(); }
+};
+
+exportMISCSV = function(){
+  normalizeDBSafe();
+  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
+  const dept=document.getElementById("misDeptFilter")?.value||"";
+  const st=document.getElementById("misStatusFilter")?.value||"";
+  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
+  if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
+  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
+  rows.forEach(r=>csvRows.push([r.projectName,r.jobCode,r.client,r.stage,r.sub,r.department,r.task,r.owner,r.taskStatus,r.initialPlanningDate,r.actualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback]));
+  downloadFile("all-projects-mis-summary.csv", csv(csvRows), "text/csv");
+};
 
 window.addEventListener("DOMContentLoaded", function(){
-  const modal = trackerEl("modal");
+  const modal = document.getElementById("modal");
   if(modal) modal.classList.add("hidden");
-
-  // Capture important navigation clicks before any broken inline handler can stop the page.
-  document.addEventListener("click", function(e){
-    const tab = e.target.closest && e.target.closest(".tab");
-    if(tab){
-      const id = tab.id || "";
-      if(id === "dashboardTab"){ e.preventDefault(); e.stopPropagation(); window.showDashboard(); return; }
-      if(id === "projectTab"){ e.preventDefault(); e.stopPropagation(); window.showProjectView(); return; }
-      if(id === "misTab"){ e.preventDefault(); e.stopPropagation(); window.showMIS(); return; }
-      if(id === "setupTab" || (tab.textContent || "").includes("Setup")){ e.preventDefault(); e.stopPropagation(); window.showSetup(); return; }
-    }
-    const btn = e.target.closest && e.target.closest("button");
-    if(btn && (btn.textContent || "").trim().toLowerCase() === "logout"){
-      e.preventDefault(); e.stopPropagation(); window.logout();
-    }
-  }, true);
+  [...document.querySelectorAll(".tab")].forEach(tab=>{ if((tab.textContent||"").includes("Setup")) tab.id = "setupTab"; });
 });
-/* ========= END CLICK / DASHBOARD FAIL-SAFE PATCH ========= */
+/* ===== END EMERGENCY SAFE DATA + NAVIGATION PATCH ===== */
 
 initAuthState();
-
-
-
-
-
-
-
-/* Project-wise duplicate MIS override removed. MIS now uses the main task-wise MIS table with stage-level dates. */
-
 
 </script>
 
