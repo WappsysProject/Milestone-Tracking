@@ -2641,6 +2641,301 @@ window.addEventListener("DOMContentLoaded", function(){
 /* ===== END FAST LOAD + DASHBOARD PERFORMANCE PATCH V3 ===== */
 
 
+
+/* ===== SPEED + LATEST-STAGE MIS PATCH V4 =====
+   Purpose:
+   - Make reload feel faster by avoiding automatic heavy dashboard scans.
+   - MIS Dashboard and MIS CSV now show only one row per project: current/latest stage.
+   - No Firebase data deletion. Old task-level date fields remain stored but are not exported in MIS.
+*/
+let __dashboardDetailsLoadedV4 = false;
+let __dashboardQuickTokenV4 = 0;
+
+function quickTaskStatsV4(project){
+  const tasks = toSafeArray(project && project.tasks);
+  let done=0, progress=0, todo=0;
+  tasks.forEach(t => {
+    if(t.status === "Done") done++;
+    else if(t.status === "In Progress") progress++;
+    else todo++;
+  });
+  const total = tasks.length;
+  return {
+    total,
+    done,
+    progress,
+    todo,
+    completion: total ? Math.round(done * 100 / total) : 0,
+    health: (total && done === total) ? "Green" : (progress ? "Amber" : "Green")
+  };
+}
+
+function workflowOrderForStageV4(stage, sub){
+  const s = canonicalTaskText(stage);
+  const u = canonicalTaskText(sub);
+  let found = WORKFLOW_TEMPLATE.findIndex(item => canonicalTaskText(item.stage) === s && canonicalTaskText(item.sub) === u);
+  return found >= 0 ? found : 99999;
+}
+
+function actualStageGroupsV4(project){
+  const tasks = toSafeArray(project && project.tasks);
+  const map = new Map();
+  tasks.forEach((task, index) => {
+    const stage = task.stage || "Stage Not Updated";
+    const sub = task.sub || "Sub-stage Not Updated";
+    const key = stageDateKey(stage, sub);
+    if(!map.has(key)){
+      map.set(key, {
+        key,
+        stage,
+        sub,
+        order: workflowOrderForStageV4(stage, sub),
+        firstIndex: index,
+        tasks: []
+      });
+    }
+    map.get(key).tasks.push(task);
+  });
+  return [...map.values()].sort((a,b) => (a.order - b.order) || (a.firstIndex - b.firstIndex));
+}
+
+function statusForTaskSetV4(tasks){
+  tasks = toSafeArray(tasks);
+  if(!tasks.length) return "Pending";
+  if(tasks.every(t => t.status === "Done")) return "Done";
+  if(tasks.some(t => t.status === "In Progress")) return "In Progress";
+  return "To Do";
+}
+
+function currentLatestStageSummaryV4(project){
+  const groups = actualStageGroupsV4(project);
+  if(!groups.length){
+    return {
+      key:"", stage:"Not Started", sub:"-", tasks:[], status:"To Do", order:0,
+      pendingTasks:0, totalTasks:0, departments:"-", owners:"-"
+    };
+  }
+
+  const allDone = groups.every(g => g.tasks.length && g.tasks.every(t => t.status === "Done"));
+  let group = null;
+
+  if(allDone){
+    group = groups[groups.length - 1];
+  } else {
+    const active = groups.filter(g => g.tasks.some(t => t.status === "In Progress"));
+    group = active.length ? active[active.length - 1] : groups.find(g => !g.tasks.every(t => t.status === "Done"));
+  }
+
+  if(!group) group = groups[0];
+  const pendingTasks = group.tasks.filter(t => t.status !== "Done").length;
+  const depts = [...new Set(group.tasks.map(t => t.dept || "-").filter(Boolean))];
+  const owners = [...new Set(group.tasks.map(t => t.owner || "-").filter(Boolean))];
+
+  return {
+    ...group,
+    status: allDone ? "Completed" : statusForTaskSetV4(group.tasks),
+    pendingTasks,
+    totalTasks: group.tasks.length,
+    departments: depts.join("; ") || "-",
+    owners: owners.join("; ") || "-"
+  };
+}
+
+function stageDateValueV4(project, summary, field){
+  if(!project || !summary) return "";
+  const key = summary.key || stageDateKey(summary.stage, summary.sub);
+  const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : null;
+  const direct = rec ? normalizeDateForInput(rec[field]) : "";
+  if(direct) return direct;
+
+  const tasks = toSafeArray(summary.tasks);
+  const fallbackDates = tasks
+    .map(t => normalizeDateForInput(field === "actualDate" ? t.actualDate : (t.initialPlanningDate || t.dueDate)))
+    .filter(Boolean)
+    .sort();
+  if(!fallbackDates.length) return "";
+  return field === "actualDate" ? fallbackDates[fallbackDates.length - 1] : fallbackDates[0];
+}
+
+function projectMISValueV4(project, summary, keys, defaultValue="Pending"){
+  const tasks = toSafeArray(summary && summary.tasks);
+  for(const k of keys){
+    if(hasValue(project && project[k])) return project[k];
+  }
+  for(const t of tasks){
+    for(const k of keys){
+      if(hasValue(t && t[k])) return t[k];
+    }
+  }
+  return defaultValue;
+}
+
+function getMISLatestStageRowsV4(){
+  normalizeDBSafe();
+  return db.projects.map(project => {
+    project.tasks = toSafeArray(project.tasks);
+    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+    const s = quickTaskStatsV4(project);
+    const latest = currentLatestStageSummaryV4(project);
+    const planned = stageDateValueV4(project, latest, "initialPlanningDate");
+    const actual = stageDateValueV4(project, latest, "actualDate");
+    const overdue = planned && latest.status !== "Completed" && daysFromToday(planned) < 0;
+    const health = s.completion === 100 ? "Green" : (overdue ? "Red" : (latest.status === "In Progress" ? "Amber" : "Green"));
+
+    return {
+      projectName: project.name || "",
+      jobCode: project.jobCode || "",
+      client: project.client || "",
+      projectManager: project.manager || "",
+      overallStatus: project.overallStatus || "",
+      completion: s.completion + "%",
+      health,
+      currentStage: latest.stage || "",
+      currentSubStage: latest.sub || "",
+      stageStatus: latest.status || "",
+      departments: latest.departments || "-",
+      owners: latest.owners || "-",
+      pendingTasks: latest.pendingTasks || 0,
+      totalTasksInStage: latest.totalTasks || 0,
+      totalProjectTasks: s.total,
+      stagePlannedDate: formatDateDisplay(planned),
+      stageActualDate: formatDateDisplay(actual),
+      siteMom: projectMISValueV4(project, latest, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"]),
+      quality: projectMISValueV4(project, latest, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"]),
+      correspondence: projectMISValueV4(project, latest, ["correspondence", "mailStatus", "clientCorrespondence"]),
+      expense: projectMISValueV4(project, latest, ["expense", "expenseStatus", "siteExpense"]),
+      budget: hasValue(project.budget) ? project.budget : "Pending",
+      budgetDeviation: projectMISValueV4(project, latest, ["budgetDeviation", "deviation"], "No Deviation"),
+      billingStatus: projectMISValueV4(project, latest, ["billingStatus", "billing"]),
+      collectionStatus: projectMISValueV4(project, latest, ["collectionStatus", "collection"]),
+      customerFeedback: projectMISValueV4(project, latest, ["customerFeedback", "clientFeedback"])
+    };
+  });
+}
+
+function filteredMISLatestStageRowsV4(){
+  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
+  const dept=document.getElementById("misDeptFilter")?.value||"";
+  const st=document.getElementById("misStatusFilter")?.value||"";
+  let rows = getMISLatestStageRowsV4();
+  if(dept) rows = rows.filter(r => (r.departments || "").split(/;\s*/).includes(dept));
+  if(st) rows = rows.filter(r => r.stageStatus === st || (st === "Done" && r.stageStatus === "Completed"));
+  if(q) rows = rows.filter(r => Object.values(r).join(" ").toLowerCase().includes(q));
+  return rows;
+}
+
+renderMIS = function(){
+  return safeRender("Latest Stage MIS", () => {
+    const table=document.getElementById("misTable"); if(!table) return;
+    const rows = filteredMISLatestStageRowsV4();
+    setText("misRowsCount", rows.length);
+    setText("misMomPending", rows.filter(r=>r.siteMom==="Pending").length);
+    setText("misQualityPending", rows.filter(r=>r.quality==="Pending").length);
+    setText("misCorrespondencePending", rows.filter(r=>r.correspondence==="Pending").length);
+    setText("misExpensePending", rows.filter(r=>r.expense==="Pending").length);
+    setText("misBudgetDeviation", rows.filter(r=>r.budgetDeviation && !["Pending","No Deviation"].includes(r.budgetDeviation)).length);
+    setText("misBillingPending", rows.filter(r=>r.billingStatus==="Pending").length);
+    setText("misCollectionPending", rows.filter(r=>r.collectionStatus==="Pending").length);
+
+    let html=`<tr>
+      <th>Project</th><th>Job Code</th><th>Client</th><th>Project Manager</th><th>Completion</th><th>Health</th>
+      <th>Latest / Current Stage</th><th>Sub-stage</th><th>Stage Status</th><th>Departments</th><th>Owners</th>
+      <th>Pending Tasks in Stage</th><th>Total Tasks in Stage</th><th>Stage Planned Date</th><th>Stage Actual Date</th>
+      <th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th>
+    </tr>`;
+    html += rows.map(r=>`<tr>
+      <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.client)}</td><td>${esc(r.projectManager)}</td><td>${esc(r.completion)}</td><td>${esc(r.health)}</td>
+      <td>${esc(r.currentStage)}</td><td>${esc(r.currentSubStage)}</td><td>${esc(r.stageStatus)}</td><td>${esc(r.departments)}</td><td>${esc(r.owners)}</td>
+      <td>${esc(r.pendingTasks)}</td><td>${esc(r.totalTasksInStage)}</td><td>${esc(r.stagePlannedDate)}</td><td>${esc(r.stageActualDate)}</td>
+      <td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
+    </tr>`).join("");
+    table.innerHTML = html || "";
+  });
+};
+
+exportMISCSV = function(){
+  const rows = filteredMISLatestStageRowsV4();
+  const headers = [
+    "Project Name","Job Code","Client","Project Manager","Overall Status","Completion","Health",
+    "Latest / Current Stage","Sub-stage","Stage Status","Departments","Owners","Pending Tasks in Stage","Total Tasks in Stage","Total Project Tasks",
+    "Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"
+  ];
+  const data = rows.map(r => [
+    r.projectName,r.jobCode,r.client,r.projectManager,r.overallStatus,r.completion,r.health,
+    r.currentStage,r.currentSubStage,r.stageStatus,r.departments,r.owners,r.pendingTasks,r.totalTasksInStage,r.totalProjectTasks,
+    r.stagePlannedDate,r.stageActualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback
+  ]);
+  downloadFile("latest-stage-mis-summary.csv", csv([headers, ...data]), "text/csv");
+};
+
+function loadDashboardDetailsV4(){
+  __dashboardDetailsLoadedV4 = true;
+  const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
+  const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
+  safeRender("Department Progress", () => renderDepartmentDashboard());
+  safeRender("Stage Date Alerts", () => renderAlertsDashboard());
+  safeRender("System Notifications", () => renderNotificationDashboard());
+  safeRender("Current Stage Tracker", () => renderCurrentStageTable(filtered));
+  const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
+  if(myOwner) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner));
+}
+
+renderDashboard = function(){
+  return safeRender("Fast Dashboard", () => {
+    normalizeDBSafe();
+    const token = ++__dashboardQuickTokenV4;
+    const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
+    const list=document.getElementById("projectsList"); if(!list) return;
+    const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
+    const allStats = db.projects.map(p => ({p, s:quickTaskStatsV4(p), latest:currentLatestStageSummaryV4(p)}));
+    const totalProjects=db.projects.length;
+    const completedProjects=allStats.filter(x=>x.s.completion===100).length;
+    const inProgressProjects=allStats.filter(x=>x.latest.status==="In Progress").length;
+    const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
+    setText("kpiProjects",totalProjects);
+    setText("kpiOnTrack",Math.max(totalProjects-completedProjects-inProgressProjects,0));
+    setText("kpiDelayedProjects","Load");
+    setText("kpiCompletedProjects",completedProjects);
+    setText("kpiCompletion",avg+"%");
+    setText("kpiOverdueTasks","Load");
+    setText("kpiDueToday","Load");
+    setText("kpiDueWeek","Load");
+    renderActivityFeed();
+
+    list.innerHTML = filtered.map(p=>{
+      const s=quickTaskStatsV4(p);
+      const latest=currentLatestStageSummaryV4(p);
+      const planned=stageDateValueV4(p, latest, "initialPlanningDate");
+      return `<div class="card project-card" onclick="openProject('${p.id}')">
+        <div class="toolbar"><h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>${healthBadge(s.health)}</div>
+        <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
+        <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
+        <div class="summary-line"><b>Latest Stage</b><span>${esc(latest.stage||"-")}</span></div>
+        <div class="summary-line"><b>Sub-stage</b><span>${esc(latest.sub||"-")}</span></div>
+        <div class="summary-line"><b>Stage Planned Date</b><span>${esc(formatDateDisplay(planned)||"-")}</span></div>
+        <div class="summary-line"><b>Stage Status</b><span>${esc(latest.status||"-")}</span></div>
+        <div class="bar"><span style="width:${s.completion}%"></span></div>
+        <p class="muted">${s.completion}% complete · ${latest.pendingTasks||0} pending in latest stage · ${s.total} total tasks</p>
+      </div>`;
+    }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
+
+    const loadButton = `<button class="small blue" onclick="loadDashboardDetailsV4()">Load detailed section</button>`;
+    const deptEl=document.getElementById("deptDashboard"); if(deptEl) deptEl.innerHTML=`<p class="muted">Detailed department progress is paused for faster loading.</p>${loadButton}`;
+    const alertEl=document.getElementById("alertDashboard"); if(alertEl) alertEl.innerHTML=`<p class="muted">Stage alerts are paused for faster loading.</p>${loadButton}`;
+    const notifEl=document.getElementById("notificationDashboard"); if(notifEl) notifEl.innerHTML=`<p class="muted">Notifications are paused for faster loading.</p>${loadButton}`;
+    const currentTable=document.getElementById("currentStageTable"); if(currentTable) currentTable.innerHTML=`<tr><td>Detailed current-stage tracker is paused for faster loading. ${loadButton}</td></tr>`;
+    const myTasks=document.getElementById("myTasksDashboard");
+    const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
+    if(myTasks){
+      if(myOwner) setTimeout(() => { if(token === __dashboardQuickTokenV4) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner)); }, 10);
+      else myTasks.innerHTML='<p class="muted">Type owner name/email to see assigned tasks.</p>';
+    }
+  });
+};
+
+showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
+/* ===== END SPEED + LATEST-STAGE MIS PATCH V4 ===== */
+
 initAuthState();
 
 </script>
