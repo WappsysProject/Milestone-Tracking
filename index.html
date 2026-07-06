@@ -2375,6 +2375,272 @@ window.addEventListener("DOMContentLoaded", function(){
 });
 /* ===== END EMERGENCY SAFE DATA + NAVIGATION PATCH ===== */
 
+/* ===== FAST LOAD + DASHBOARD PERFORMANCE PATCH V3 =====
+   Purpose: reduce reload delay without deleting / overwriting Firebase data.
+   - Uses single Firebase read on page load instead of continuous full re-render listener.
+   - Converts Firebase object maps to arrays safely.
+   - Keeps old task-level date fields for recovery, while UI/MIS uses stage dates.
+   - Makes dashboard render in two phases: critical KPIs/cards first, heavy panels after.
+   - Adds cached stage grouping to avoid repeated full task scans.
+*/
+const __stageIndexCache = new WeakMap();
+let __dashboardRenderToken = 0;
+let __firebaseInitialLoadDone = false;
+
+function projectSignature(project){
+  const tasks = toSafeArray(project && project.tasks);
+  const statusPart = tasks.map(t => [t.id||"", t.status||"", t.stage||"", t.sub||"", t.owner||"", t.task||""].join("~")).join("|");
+  const dateKeys = project && project.stageDates ? Object.keys(project.stageDates).length : 0;
+  return `${tasks.length}::${dateKeys}::${statusPart}`;
+}
+
+function buildStageIndex(project){
+  if(!project || typeof project !== "object") return { signature:"", groups:[], tasksByKey:new Map() };
+  project.tasks = toSafeArray(project.tasks);
+  const signature = projectSignature(project);
+  const cached = __stageIndexCache.get(project);
+  if(cached && cached.signature === signature) return cached;
+
+  const groups = new Map();
+  const tasksByKey = new Map();
+  const addGroup = (stage, sub, order) => {
+    const safeStage = stage || "Stage Not Updated";
+    const safeSub = sub || "Sub-stage Not Updated";
+    const key = stageDateKey(safeStage, safeSub);
+    if(!groups.has(key)) groups.set(key, { key, stage:safeStage, sub:safeSub, order });
+    if(!tasksByKey.has(key)) tasksByKey.set(key, []);
+  };
+
+  WORKFLOW_TEMPLATE.forEach((item, index) => addGroup(item.stage, item.sub, index));
+  project.tasks.forEach((task, index) => {
+    addGroup(task.stage, task.sub, WORKFLOW_TEMPLATE.length + index);
+    const key = stageDateKey(task.stage || "Stage Not Updated", task.sub || "Sub-stage Not Updated");
+    tasksByKey.get(key).push(task);
+  });
+
+  const index = { signature, groups:[...groups.values()].sort((a,b)=>a.order-b.order), tasksByKey };
+  __stageIndexCache.set(project, index);
+  return index;
+}
+
+getProjectStageGroups = function(project){ return buildStageIndex(project).groups; };
+getStageTasks = function(project, stage, sub){
+  const key = stageDateKey(stage || "Stage Not Updated", sub || "Sub-stage Not Updated");
+  return buildStageIndex(project).tasksByKey.get(key) || [];
+};
+ensureStageDates = function(project){
+  if(!project || typeof project !== "object") return {};
+  project.tasks = toSafeArray(project.tasks);
+  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
+  const index = buildStageIndex(project);
+  index.groups.forEach(group => {
+    const key = group.key;
+    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
+      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
+    }
+    const rec = project.stageDates[key];
+    rec.stage = group.stage;
+    rec.sub = group.sub;
+    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
+    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
+
+    const relatedTasks = index.tasksByKey.get(key) || [];
+    if(!rec.initialPlanningDate){
+      const plannedDates = relatedTasks.map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate)).filter(Boolean).sort();
+      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
+    }
+    if(!rec.actualDate){
+      const actualDates = relatedTasks.map(t => normalizeDateForInput(t.actualDate)).filter(Boolean).sort();
+      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
+    }
+  });
+  return project.stageDates;
+};
+
+isStageComplete = function(project, group){
+  const tasks = getStageTasks(project, group.stage, group.sub);
+  return tasks.length > 0 && tasks.every(task => task.status === "Done");
+};
+isStageOverdue = function(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) < 0);
+};
+isStageDueToday = function(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) === 0);
+};
+isStageDueThisWeek = function(project, group){
+  const rec = getStageDateRecord(project, group.stage, group.sub);
+  const d = daysFromToday(rec.initialPlanningDate);
+  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && d >= 0 && d <= 7);
+};
+
+stats = function(p){
+  p.tasks = toSafeArray(p.tasks);
+  ensureStageDates(p);
+  let done=0, progress=0, todo=0;
+  p.tasks.forEach(t => {
+    if(t.status === "Done") done++;
+    else if(t.status === "In Progress") progress++;
+    else todo++;
+  });
+  const groups = getProjectStageGroups(p);
+  let overdue=0, dueToday=0, dueWeek=0;
+  groups.forEach(g => {
+    if(isStageOverdue(p,g)) overdue++;
+    else if(isStageDueToday(p,g)) dueToday++;
+    else if(isStageDueThisWeek(p,g)) dueWeek++;
+  });
+  const total = p.tasks.length;
+  const completion = total ? Math.round(done*100/total) : 0;
+  const health = overdue === 0 ? "Green" : (overdue <= 3 ? "Amber" : "Red");
+  return { total, done, progress, todo, overdue, dueToday, dueWeek, criticalOverdue:0, completion, health };
+};
+
+function setLoadMessage(message){
+  const list = document.getElementById("projectsList");
+  if(list) list.innerHTML = `<div class="card"><b>${esc(message)}</b></div>`;
+  const mode = document.getElementById("storageMode");
+  if(mode) mode.textContent = message;
+}
+
+load = function(){
+  if(dbListenerStarted) return;
+  dbListenerStarted = true;
+
+  let localData = null;
+  const localCopy = localStorage.getItem("projectTrackerDB");
+  if(localCopy){
+    try { localData = JSON.parse(localCopy); } catch(e) { localData = null; }
+  }
+  if(localData){ db = localData; normalizeDBSafe(); }
+
+  if(firebaseReady && firebaseDBRef){
+    setLoadMessage("Loading Firebase data...");
+    firebaseDBRef.once("value")
+      .then(snapshot => {
+        const remoteData = snapshot.val();
+        if(remoteData === null){
+          if(localData && countProjectsIn(localData) > 0) db = localData;
+          else db = { projects: [], users: {}, activity: [] };
+        } else {
+          const remoteProjects = countProjectsIn(remoteData);
+          const localProjects = countProjectsIn(localData);
+          db = (remoteProjects === 0 && localProjects > 0) ? localData : remoteData;
+          if(remoteProjects === 0 && localProjects > 0){
+            alert("Firebase returned 0 projects. Browser backup is shown for safety. Please verify before saving.");
+          }
+        }
+        normalizeDBSafe();
+        ensureUsers();
+        rememberDataHealth();
+        try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
+        __firebaseInitialLoadDone = true;
+        const mode = document.getElementById("storageMode");
+        if(mode) mode.textContent = "Firebase data loaded - optimized mode";
+        if(applyCurrentUserRoleFromDB()) renderAll();
+      })
+      .catch(error => {
+        console.error("Firebase load failed.", error);
+        if(localData){
+          db = localData; normalizeDBSafe(); ensureUsers(); rememberDataHealth();
+          alert("Firebase loading was slow/failed, so browser backup is shown. Error: " + error.message);
+          if(applyCurrentUserRoleFromDB()) renderAll();
+        } else {
+          setLoadMessage("Firebase load failed: " + error.message);
+        }
+      });
+  } else {
+    normalizeDBSafe();
+    ensureUsers();
+    rememberDataHealth();
+    applyCurrentUserRoleFromDB();
+    renderAll();
+  }
+};
+
+renderDashboard = function(){
+  normalizeDBSafe();
+  const token = ++__dashboardRenderToken;
+  const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
+  const list=document.getElementById("projectsList"); if(!list) return;
+  const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
+
+  const allStats = db.projects.map(p=>({p, s:stats(p)}));
+  const totalProjects=db.projects.length;
+  const completedProjects=allStats.filter(x=>x.s.completion===100).length;
+  const delayedProjects=allStats.filter(x=>x.s.overdue>0).length;
+  const onTrack=allStats.filter(x=>x.s.overdue===0 && x.s.completion<100).length;
+  const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
+  const overdueTasks=allStats.reduce((a,x)=>a+x.s.overdue,0);
+  const dueToday=allStats.reduce((a,x)=>a+x.s.dueToday,0);
+  const dueWeek=allStats.reduce((a,x)=>a+x.s.dueWeek,0);
+
+  setText("kpiProjects",totalProjects); setText("kpiOnTrack",onTrack); setText("kpiDelayedProjects",delayedProjects);
+  setText("kpiCompletedProjects",completedProjects); setText("kpiCompletion",avg+"%"); setText("kpiOverdueTasks",overdueTasks);
+  setText("kpiDueToday",dueToday); setText("kpiDueWeek",dueWeek);
+
+  renderActivityFeed();
+
+  list.innerHTML = filtered.map(p=>{
+    const s=stats(p);
+    const next=nextPendingTask(p);
+    return `<div class="card project-card" onclick="openProject('${p.id}')">
+      <div class="toolbar"><h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>${healthBadge(s.health)}</div>
+      <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
+      <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
+      <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
+      <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
+      <div class="summary-line"><b>Stage Planned Date</b><span>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</span></div>
+      <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
+      <div class="bar"><span style="width:${s.completion}%"></span></div>
+      <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
+    </div>`;
+  }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
+
+  const deptEl=document.getElementById("deptDashboard"); if(deptEl) deptEl.innerHTML='<p class="muted">Loading department progress...</p>';
+  const alertEl=document.getElementById("alertDashboard"); if(alertEl) alertEl.innerHTML='<p class="muted">Loading stage alerts...</p>';
+  const notifEl=document.getElementById("notificationDashboard"); if(notifEl) notifEl.innerHTML='<p class="muted">Loading notifications...</p>';
+  const currentTable=document.getElementById("currentStageTable"); if(currentTable) currentTable.innerHTML='<tr><td>Loading current stages...</td></tr>';
+  const myTasks=document.getElementById("myTasksDashboard"); if(myTasks && !(document.getElementById("myTaskOwner")?.value||"").trim()) myTasks.innerHTML='<p class="muted">Type owner name/email to see assigned tasks.</p>';
+
+  setTimeout(() => {
+    if(token !== __dashboardRenderToken) return;
+    safeRender("Department Progress", () => renderDepartmentDashboard());
+    safeRender("Stage Date Alerts", () => renderAlertsDashboard());
+    safeRender("System Notifications", () => renderNotificationDashboard());
+    safeRender("Current Stage Tracker", () => renderCurrentStageTable(filtered));
+    const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
+    if(myOwner) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner));
+  }, 30);
+};
+
+renderAll = function(){
+  normalizeDBSafe();
+  ensureUsers();
+  applyMinorTaskUpdates();
+  updateUserProfileBox();
+  if(!document.getElementById("dashboardView")?.classList.contains("hidden")) renderDashboard();
+  if(currentProjectId && !document.getElementById("projectView")?.classList.contains("hidden")) renderProject();
+  if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS();
+};
+
+showDashboard = function(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); };
+showProjectView = function(){
+  setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden");
+  normalizeDBSafe();
+  if(!currentProjectId && db.projects.length) currentProjectId = db.projects[0].id;
+  renderProject();
+};
+showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
+showSetup = function(){ setTab("setupTab"); hideAll(); document.getElementById("setupView").classList.remove("hidden"); };
+
+window.addEventListener("DOMContentLoaded", function(){
+  [...document.querySelectorAll(".tab")].forEach(tab=>{ if((tab.textContent||"").includes("Setup")) tab.id = "setupTab"; });
+});
+/* ===== END FAST LOAD + DASHBOARD PERFORMANCE PATCH V3 ===== */
+
+
 initAuthState();
 
 </script>
