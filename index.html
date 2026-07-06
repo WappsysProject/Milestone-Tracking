@@ -110,7 +110,7 @@
 <body>
 <header id="mainHeader">
   <h1>Project Tracking Dashboard</h1>
-  <p>Dashboard + project-wise Excel-style tracker | STAGE-DATES-ONLY VERSION v90</p>
+  <p>Dashboard + project-wise Excel-style tracker for Contracts, Technical, Purchase and Projects teams</p>
 </header>
 
 <div class="wrap">
@@ -238,7 +238,7 @@
         <div class="toolbar">
           <div>
             <h3 style="margin:0">Stage-wise Dates</h3>
-            <p class="muted" style="margin:4px 0 0">STAGE-DATES-ONLY v90: Task-level date columns are removed. Enter dates only at stage/sub-stage level; MIS Summary will use these stage dates.</p>
+            <p class="muted" style="margin:4px 0 0">Task-level dates have been removed. Enter planned and actual dates at stage/sub-stage level; MIS Summary will use these dates.</p>
           </div>
         </div>
         <div class="table-scroll" style="overflow:auto;max-height:45vh;margin-top:12px">
@@ -325,10 +325,9 @@
           This version is connected to Firebase Realtime Database and Firebase Authentication. Use Firebase Authentication Users for passwords, and use this tracker only for user roles, projects, tasks, alerts and reports.
         </div>
         <h3>Firebase Setup Status</h3>
-        <div class="firebase-box">STAGE-DATES-ONLY v90 loaded.
-Firebase configuration is already added in this HTML file.
-Task-level due/planning/actual date fields are removed from the task tracker.
-Stage planned/actual dates are managed in the Stage-wise Dates table.
+        <div class="firebase-box">Firebase configuration is already added in this HTML file.
+Do not paste PASTE_HERE values anywhere.
+Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
         <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button>
@@ -973,16 +972,6 @@ function applyMinorTaskUpdates(){
 }
 
 let workflowSyncRunning = false;
-let stageDateMigrationSaved = false;
-function persistStageDateMigrationIfNeeded(){
-  if(stageDateMigrationSaved) return;
-  if(!(firebaseReady && firebaseDBRef && firebase.auth && firebase.auth().currentUser)) return;
-  stageDateMigrationSaved = true;
-  firebaseDBRef.set(db).catch(error => {
-    stageDateMigrationSaved = false;
-    console.error("Stage-date migration save failed", error);
-  });
-}
 function templateTaskKey(t){
   // Unique workflow identity. technicalTask is intentionally ignored here:
   // otherwise the same task can be duplicated when a Technical Team assignment is changed later.
@@ -1243,7 +1232,7 @@ function initAuthState(){
   });
 }
 
-function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); (db.projects||[]).forEach(ensureStageDates); persistStageDateMigrationIfNeeded(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
+function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
 function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
