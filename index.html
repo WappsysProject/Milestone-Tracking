@@ -2135,2078 +2135,243 @@ function exportMISCSV(){
 }
 /* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
 
-
-/* ===== EMERGENCY SAFE DATA + NAVIGATION PATCH v2026-07-06C =====
-   Data safety rules:
-   - Never convert existing projects/tasks to empty just because Firebase returns object maps.
-   - Never delete hidden old task date fields during stage-date migration.
-   - Never save an accidental 0-project/0-task state over known existing data.
-   - Keep dashboard tabs, logout and setup clickable even if one table render fails.
-*/
-let __lastKnownProjectCount = 0;
-let __lastKnownTaskCount = 0;
-let __allowDangerousEmptySave = false;
-
-function toSafeArray(value){
-  if(Array.isArray(value)) return value.filter(x => x && typeof x === "object");
-  if(value && typeof value === "object") return Object.values(value).filter(x => x && typeof x === "object");
-  return [];
-}
-function countProjectsIn(data){ return toSafeArray(data && data.projects).length; }
-function countTasksIn(data){ return toSafeArray(data && data.projects).reduce((sum,p)=>sum + toSafeArray(p && p.tasks).length, 0); }
-function rememberDataHealth(){
-  const pc = countProjectsIn(db);
-  const tc = countTasksIn(db);
-  if(pc > __lastKnownProjectCount) __lastKnownProjectCount = pc;
-  if(tc > __lastKnownTaskCount) __lastKnownTaskCount = tc;
-}
-function normalizeDBSafe(){
-  if(!db || typeof db !== "object") db = { projects: [], users: {}, activity: [] };
-  db.projects = toSafeArray(db.projects);
-  db.activity = toSafeArray(db.activity);
-  if(!db.users || typeof db.users !== "object" || Array.isArray(db.users)) db.users = {};
-  db.projects.forEach(project => {
-    if(!project.id) project.id = uid();
-    project.tasks = toSafeArray(project.tasks);
-    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-    project.tasks.forEach(task => {
-      if(!task.id) task.id = uid();
-      if(!task.stage) task.stage = "Stage Not Updated";
-      if(!task.sub) task.sub = "Sub-stage Not Updated";
-      if(!task.dept) task.dept = "Projects Team";
-      if(!task.task) task.task = "Task Not Updated";
-      if(!task.status) task.status = "To Do";
-      if(!Array.isArray(task.history)) task.history = toSafeArray(task.history);
-    });
-  });
-  rememberDataHealth();
-  return db;
+/* ===== CLEAN SUB-STAGE DATE ENGINE ===== */
+function cleanStatus(value){
+  return String(value || "").trim().toLowerCase();
 }
 
-ensureStageDates = function(project){
-  if(!project || typeof project !== "object") return {};
-  project.tasks = toSafeArray(project.tasks);
-  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-  const groups = getProjectStageGroups(project);
-  groups.forEach(group => {
-    const key = group.key;
-    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
-      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
-    }
-    const rec = project.stageDates[key];
-    rec.stage = group.stage;
-    rec.sub = group.sub;
-    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
-    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
-
-    const relatedTasks = getStageTasks(project, group.stage, group.sub);
-    if(!rec.initialPlanningDate){
-      const plannedDates = relatedTasks.map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate)).filter(Boolean).sort();
-      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
-    }
-    if(!rec.actualDate){
-      const actualDates = relatedTasks.map(t => normalizeDateForInput(t.actualDate)).filter(Boolean).sort();
-      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
-    }
-  });
-  return project.stageDates;
-};
-
-normalizeAllDates = function(){
-  normalizeDBSafe();
-  (db.projects || []).forEach(p => {
-    normalizeDateFields(p);
-    ensureStageDates(p);
-    (p.tasks || []).forEach(t => {
-      // UI/MIS ignore task-level dates, but old values stay in data for recovery/backward safety.
-      normalizeDateFields(t);
-    });
-  });
-};
-
-function safeBackupBeforeSave(){
-  try{
-    normalizeDBSafe();
-    localStorage.setItem("projectTrackerDB_last_before_save", JSON.stringify(db));
-    localStorage.setItem("projectTrackerDB_safety_" + new Date().toISOString().replace(/[:.]/g,"-"), JSON.stringify(db));
-  }catch(e){ console.warn("Safety backup failed", e); }
-}
-
-const __originalSave = save;
-save = function(){
-  normalizeDBSafe();
-  const currentProjects = countProjectsIn(db);
-  const currentTasks = countTasksIn(db);
-  if(!__allowDangerousEmptySave && __lastKnownProjectCount > 0 && currentProjects === 0){
-    alert("Save blocked for safety: current screen has 0 projects, but earlier data had projects. This prevents accidental Firebase overwrite. Refresh or restore backup instead.");
-    return;
-  }
-  if(!__allowDangerousEmptySave && __lastKnownTaskCount > 0 && currentProjects > 0 && currentTasks === 0){
-    alert("Save blocked for safety: projects are present but all tasks are missing. This prevents accidental task overwrite. Refresh or restore backup instead.");
-    return;
-  }
-  safeBackupBeforeSave();
-  return __originalSave();
-};
-
-load = function(){
-  if(dbListenerStarted) return;
-
-  let localData = null;
-  const localCopy = localStorage.getItem("projectTrackerDB");
-  if(localCopy){
-    try { localData = JSON.parse(localCopy); db = localData; normalizeDBSafe(); } catch(e) { localData = null; db = { projects: [], users: {}, activity: [] }; }
-  }
-
-  if(firebaseReady && firebaseDBRef){
-    dbListenerStarted = true;
-    firebaseDBRef.on("value", snapshot => {
-      const remoteData = snapshot.val();
-
-      if(remoteData === null) {
-        if(localData && countProjectsIn(localData) > 0) db = localData;
-        else if(!db || typeof db !== "object") db = { projects: [], users: {}, activity: [] };
-        normalizeDBSafe();
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-        if(firebase.auth().currentUser && (countProjectsIn(db) > 0 || changed)){
-          firebaseDBRef.set(db).catch(error => console.error("Initial database seed failed", error));
-        }
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database - initialized safely";
-        if(applyCurrentUserRoleFromDB()) renderAll();
-      } else {
-        const remoteProjects = countProjectsIn(remoteData);
-        const localProjects = countProjectsIn(localData);
-        if(remoteProjects === 0 && localProjects > 0){
-          db = localData;
-          alert("Firebase returned 0 projects. The tracker is showing your browser backup instead to prevent data loss. Verify before saving.");
-        } else {
-          db = remoteData || {};
-        }
-        normalizeDBSafe();
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-        if(changed && !dbSeedingUsers && firebase.auth().currentUser){
-          dbSeedingUsers = true;
-          firebaseDBRef.child("users").set(db.users).finally(()=>{ dbSeedingUsers = false; });
-        }
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication - safe mode";
-        if(applyCurrentUserRoleFromDB()) renderAll();
-      }
-    }, error => {
-      console.error("Firebase load failed.", error);
-      const mode = document.getElementById("storageMode");
-      if(mode) mode.textContent = "Firebase load failed";
-      alert("Could not load Firebase data. Please check Realtime Database Rules and make sure you are logged in. Error: " + error.message);
-    });
-  } else {
-    normalizeDBSafe();
-    ensureUsers();
-    applyCurrentUserRoleFromDB();
-    renderAll();
-  }
-};
-
-function showAppMessage(message){
-  const target = document.getElementById("projectsList") || document.getElementById("dashboardView");
-  if(target) target.innerHTML = `<div class="card"><b>${esc(message)}</b></div>`;
-}
-function safeRender(label, fn){
-  try { normalizeDBSafe(); return fn(); }
-  catch(error){
-    console.error("Project Tracker render error in " + label, error);
-    showAppMessage("Dashboard section error: " + (error && error.message ? error.message : error));
-    return null;
-  }
-}
-
-const __originalRenderDashboard = renderDashboard;
-const __originalRenderProject = renderProject;
-const __originalRenderMIS = renderMIS;
-renderDashboard = function(){ return safeRender("Dashboard", () => __originalRenderDashboard()); };
-renderProject = function(){ return safeRender("Project", () => __originalRenderProject()); };
-renderMIS = function(){ return safeRender("MIS", () => __originalRenderMIS()); };
-renderMISDashboard = function(){ return renderMIS(); };
-
-renderAll = function(){
-  normalizeDBSafe();
-  ensureUsers();
-  applyMinorTaskUpdates();
-  updateUserProfileBox();
-  renderDashboard();
-  if(currentProjectId) renderProject();
-  if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS();
-};
-
-hideAll = function(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>{ const el=document.getElementById(id); if(el) el.classList.add("hidden"); }); };
-setTab = function(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id && document.getElementById(id)) document.getElementById(id).classList.add("active"); };
-showDashboard = function(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); };
-showProjectView = function(){
-  setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden");
-  normalizeDBSafe();
-  if(!currentProjectId && db.projects.length) currentProjectId = db.projects[0].id;
-  renderProject();
-};
-showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
-showSetup = function(){ setTab("setupTab"); hideAll(); document.getElementById("setupView").classList.remove("hidden"); };
-logout = function(){
-  if(firebaseReady && firebase.auth){ firebase.auth().signOut().finally(()=>location.reload()); }
-  else { location.reload(); }
-};
-
-exportMISCSV = function(){
-  normalizeDBSafe();
-  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
-  const dept=document.getElementById("misDeptFilter")?.value||"";
-  const st=document.getElementById("misStatusFilter")?.value||"";
-  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
-  if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
-  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
-  rows.forEach(r=>csvRows.push([r.projectName,r.jobCode,r.client,r.stage,r.sub,r.department,r.task,r.owner,r.taskStatus,r.initialPlanningDate,r.actualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback]));
-  downloadFile("all-projects-mis-summary.csv", csv(csvRows), "text/csv");
-};
-
-window.addEventListener("DOMContentLoaded", function(){
-  const modal = document.getElementById("modal");
-  if(modal) modal.classList.add("hidden");
-  [...document.querySelectorAll(".tab")].forEach(tab=>{ if((tab.textContent||"").includes("Setup")) tab.id = "setupTab"; });
-});
-/* ===== END EMERGENCY SAFE DATA + NAVIGATION PATCH ===== */
-
-/* ===== FAST LOAD + DASHBOARD PERFORMANCE PATCH V3 =====
-   Purpose: reduce reload delay without deleting / overwriting Firebase data.
-   - Uses single Firebase read on page load instead of continuous full re-render listener.
-   - Converts Firebase object maps to arrays safely.
-   - Keeps old task-level date fields for recovery, while UI/MIS uses stage dates.
-   - Makes dashboard render in two phases: critical KPIs/cards first, heavy panels after.
-   - Adds cached stage grouping to avoid repeated full task scans.
-*/
-const __stageIndexCache = new WeakMap();
-let __dashboardRenderToken = 0;
-let __firebaseInitialLoadDone = false;
-
-function projectSignature(project){
-  const tasks = toSafeArray(project && project.tasks);
-  const statusPart = tasks.map(t => [t.id||"", t.status||"", t.stage||"", t.sub||"", t.owner||"", t.task||""].join("~")).join("|");
-  const dateKeys = project && project.stageDates ? Object.keys(project.stageDates).length : 0;
-  return `${tasks.length}::${dateKeys}::${statusPart}`;
-}
-
-function buildStageIndex(project){
-  if(!project || typeof project !== "object") return { signature:"", groups:[], tasksByKey:new Map() };
-  project.tasks = toSafeArray(project.tasks);
-  const signature = projectSignature(project);
-  const cached = __stageIndexCache.get(project);
-  if(cached && cached.signature === signature) return cached;
-
-  const groups = new Map();
-  const tasksByKey = new Map();
-  const addGroup = (stage, sub, order) => {
-    const safeStage = stage || "Stage Not Updated";
-    const safeSub = sub || "Sub-stage Not Updated";
-    const key = stageDateKey(safeStage, safeSub);
-    if(!groups.has(key)) groups.set(key, { key, stage:safeStage, sub:safeSub, order });
-    if(!tasksByKey.has(key)) tasksByKey.set(key, []);
-  };
-
-  WORKFLOW_TEMPLATE.forEach((item, index) => addGroup(item.stage, item.sub, index));
-  project.tasks.forEach((task, index) => {
-    addGroup(task.stage, task.sub, WORKFLOW_TEMPLATE.length + index);
-    const key = stageDateKey(task.stage || "Stage Not Updated", task.sub || "Sub-stage Not Updated");
-    tasksByKey.get(key).push(task);
-  });
-
-  const index = { signature, groups:[...groups.values()].sort((a,b)=>a.order-b.order), tasksByKey };
-  __stageIndexCache.set(project, index);
-  return index;
-}
-
-getProjectStageGroups = function(project){ return buildStageIndex(project).groups; };
-getStageTasks = function(project, stage, sub){
-  const key = stageDateKey(stage || "Stage Not Updated", sub || "Sub-stage Not Updated");
-  return buildStageIndex(project).tasksByKey.get(key) || [];
-};
-ensureStageDates = function(project){
-  if(!project || typeof project !== "object") return {};
-  project.tasks = toSafeArray(project.tasks);
-  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-  const index = buildStageIndex(project);
-  index.groups.forEach(group => {
-    const key = group.key;
-    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
-      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
-    }
-    const rec = project.stageDates[key];
-    rec.stage = group.stage;
-    rec.sub = group.sub;
-    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
-    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
-
-    const relatedTasks = index.tasksByKey.get(key) || [];
-    if(!rec.initialPlanningDate){
-      const plannedDates = relatedTasks.map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate)).filter(Boolean).sort();
-      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
-    }
-    if(!rec.actualDate){
-      const actualDates = relatedTasks.map(t => normalizeDateForInput(t.actualDate)).filter(Boolean).sort();
-      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
-    }
-  });
-  return project.stageDates;
-};
-
-isStageComplete = function(project, group){
-  const tasks = getStageTasks(project, group.stage, group.sub);
-  return tasks.length > 0 && tasks.every(task => task.status === "Done");
-};
-isStageOverdue = function(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) < 0);
-};
-isStageDueToday = function(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) === 0);
-};
-isStageDueThisWeek = function(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  const d = daysFromToday(rec.initialPlanningDate);
-  return !!(rec.initialPlanningDate && !isStageComplete(project, group) && d >= 0 && d <= 7);
-};
-
-stats = function(p){
-  p.tasks = toSafeArray(p.tasks);
-  ensureStageDates(p);
-  let done=0, progress=0, todo=0;
-  p.tasks.forEach(t => {
-    if(t.status === "Done") done++;
-    else if(t.status === "In Progress") progress++;
-    else todo++;
-  });
-  const groups = getProjectStageGroups(p);
-  let overdue=0, dueToday=0, dueWeek=0;
-  groups.forEach(g => {
-    if(isStageOverdue(p,g)) overdue++;
-    else if(isStageDueToday(p,g)) dueToday++;
-    else if(isStageDueThisWeek(p,g)) dueWeek++;
-  });
-  const total = p.tasks.length;
-  const completion = total ? Math.round(done*100/total) : 0;
-  const health = overdue === 0 ? "Green" : (overdue <= 3 ? "Amber" : "Red");
-  return { total, done, progress, todo, overdue, dueToday, dueWeek, criticalOverdue:0, completion, health };
-};
-
-function setLoadMessage(message){
-  const list = document.getElementById("projectsList");
-  if(list) list.innerHTML = `<div class="card"><b>${esc(message)}</b></div>`;
-  const mode = document.getElementById("storageMode");
-  if(mode) mode.textContent = message;
-}
-
-load = function(){
-  if(dbListenerStarted) return;
-  dbListenerStarted = true;
-
-  let localData = null;
-  const localCopy = localStorage.getItem("projectTrackerDB");
-  if(localCopy){
-    try { localData = JSON.parse(localCopy); } catch(e) { localData = null; }
-  }
-  if(localData){ db = localData; normalizeDBSafe(); }
-
-  if(firebaseReady && firebaseDBRef){
-    setLoadMessage("Loading Firebase data...");
-    firebaseDBRef.once("value")
-      .then(snapshot => {
-        const remoteData = snapshot.val();
-        if(remoteData === null){
-          if(localData && countProjectsIn(localData) > 0) db = localData;
-          else db = { projects: [], users: {}, activity: [] };
-        } else {
-          const remoteProjects = countProjectsIn(remoteData);
-          const localProjects = countProjectsIn(localData);
-          db = (remoteProjects === 0 && localProjects > 0) ? localData : remoteData;
-          if(remoteProjects === 0 && localProjects > 0){
-            alert("Firebase returned 0 projects. Browser backup is shown for safety. Please verify before saving.");
-          }
-        }
-        normalizeDBSafe();
-        ensureUsers();
-        rememberDataHealth();
-        try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
-        __firebaseInitialLoadDone = true;
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase data loaded - optimized mode";
-        if(applyCurrentUserRoleFromDB()) renderAll();
-      })
-      .catch(error => {
-        console.error("Firebase load failed.", error);
-        if(localData){
-          db = localData; normalizeDBSafe(); ensureUsers(); rememberDataHealth();
-          alert("Firebase loading was slow/failed, so browser backup is shown. Error: " + error.message);
-          if(applyCurrentUserRoleFromDB()) renderAll();
-        } else {
-          setLoadMessage("Firebase load failed: " + error.message);
-        }
-      });
-  } else {
-    normalizeDBSafe();
-    ensureUsers();
-    rememberDataHealth();
-    applyCurrentUserRoleFromDB();
-    renderAll();
-  }
-};
-
-renderDashboard = function(){
-  normalizeDBSafe();
-  const token = ++__dashboardRenderToken;
-  const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
-  const list=document.getElementById("projectsList"); if(!list) return;
-  const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
-
-  const allStats = db.projects.map(p=>({p, s:stats(p)}));
-  const totalProjects=db.projects.length;
-  const completedProjects=allStats.filter(x=>x.s.completion===100).length;
-  const delayedProjects=allStats.filter(x=>x.s.overdue>0).length;
-  const onTrack=allStats.filter(x=>x.s.overdue===0 && x.s.completion<100).length;
-  const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
-  const overdueTasks=allStats.reduce((a,x)=>a+x.s.overdue,0);
-  const dueToday=allStats.reduce((a,x)=>a+x.s.dueToday,0);
-  const dueWeek=allStats.reduce((a,x)=>a+x.s.dueWeek,0);
-
-  setText("kpiProjects",totalProjects); setText("kpiOnTrack",onTrack); setText("kpiDelayedProjects",delayedProjects);
-  setText("kpiCompletedProjects",completedProjects); setText("kpiCompletion",avg+"%"); setText("kpiOverdueTasks",overdueTasks);
-  setText("kpiDueToday",dueToday); setText("kpiDueWeek",dueWeek);
-
-  renderActivityFeed();
-
-  list.innerHTML = filtered.map(p=>{
-    const s=stats(p);
-    const next=nextPendingTask(p);
-    return `<div class="card project-card" onclick="openProject('${p.id}')">
-      <div class="toolbar"><h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>${healthBadge(s.health)}</div>
-      <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
-      <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
-      <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
-      <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
-      <div class="summary-line"><b>Stage Planned Date</b><span>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</span></div>
-      <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
-      <div class="bar"><span style="width:${s.completion}%"></span></div>
-      <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
-    </div>`;
-  }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
-
-  const deptEl=document.getElementById("deptDashboard"); if(deptEl) deptEl.innerHTML='<p class="muted">Loading department progress...</p>';
-  const alertEl=document.getElementById("alertDashboard"); if(alertEl) alertEl.innerHTML='<p class="muted">Loading stage alerts...</p>';
-  const notifEl=document.getElementById("notificationDashboard"); if(notifEl) notifEl.innerHTML='<p class="muted">Loading notifications...</p>';
-  const currentTable=document.getElementById("currentStageTable"); if(currentTable) currentTable.innerHTML='<tr><td>Loading current stages...</td></tr>';
-  const myTasks=document.getElementById("myTasksDashboard"); if(myTasks && !(document.getElementById("myTaskOwner")?.value||"").trim()) myTasks.innerHTML='<p class="muted">Type owner name/email to see assigned tasks.</p>';
-
-  setTimeout(() => {
-    if(token !== __dashboardRenderToken) return;
-    safeRender("Department Progress", () => renderDepartmentDashboard());
-    safeRender("Stage Date Alerts", () => renderAlertsDashboard());
-    safeRender("System Notifications", () => renderNotificationDashboard());
-    safeRender("Current Stage Tracker", () => renderCurrentStageTable(filtered));
-    const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
-    if(myOwner) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner));
-  }, 30);
-};
-
-renderAll = function(){
-  normalizeDBSafe();
-  ensureUsers();
-  applyMinorTaskUpdates();
-  updateUserProfileBox();
-  if(!document.getElementById("dashboardView")?.classList.contains("hidden")) renderDashboard();
-  if(currentProjectId && !document.getElementById("projectView")?.classList.contains("hidden")) renderProject();
-  if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS();
-};
-
-showDashboard = function(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); };
-showProjectView = function(){
-  setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden");
-  normalizeDBSafe();
-  if(!currentProjectId && db.projects.length) currentProjectId = db.projects[0].id;
-  renderProject();
-};
-showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
-showSetup = function(){ setTab("setupTab"); hideAll(); document.getElementById("setupView").classList.remove("hidden"); };
-
-window.addEventListener("DOMContentLoaded", function(){
-  [...document.querySelectorAll(".tab")].forEach(tab=>{ if((tab.textContent||"").includes("Setup")) tab.id = "setupTab"; });
-});
-/* ===== END FAST LOAD + DASHBOARD PERFORMANCE PATCH V3 ===== */
-
-
-
-/* ===== SPEED + LATEST-STAGE MIS PATCH V4 =====
-   Purpose:
-   - Make reload feel faster by avoiding automatic heavy dashboard scans.
-   - MIS Dashboard and MIS CSV now show only one row per project: current/latest stage.
-   - No Firebase data deletion. Old task-level date fields remain stored but are not exported in MIS.
-*/
-let __dashboardDetailsLoadedV4 = false;
-let __dashboardQuickTokenV4 = 0;
-
-function quickTaskStatsV4(project){
-  const tasks = toSafeArray(project && project.tasks);
-  let done=0, progress=0, todo=0;
-  tasks.forEach(t => {
-    if(t.status === "Done") done++;
-    else if(t.status === "In Progress") progress++;
-    else todo++;
-  });
-  const total = tasks.length;
-  return {
-    total,
-    done,
-    progress,
-    todo,
-    completion: total ? Math.round(done * 100 / total) : 0,
-    health: (total && done === total) ? "Green" : (progress ? "Amber" : "Green")
-  };
-}
-
-function workflowOrderForStageV4(stage, sub){
-  const s = canonicalTaskText(stage);
-  const u = canonicalTaskText(sub);
-  let found = WORKFLOW_TEMPLATE.findIndex(item => canonicalTaskText(item.stage) === s && canonicalTaskText(item.sub) === u);
-  return found >= 0 ? found : 99999;
-}
-
-function actualStageGroupsV4(project){
-  const tasks = toSafeArray(project && project.tasks);
-  const map = new Map();
-  tasks.forEach((task, index) => {
-    const stage = task.stage || "Stage Not Updated";
-    const sub = task.sub || "Sub-stage Not Updated";
-    const key = stageDateKey(stage, sub);
-    if(!map.has(key)){
-      map.set(key, {
-        key,
-        stage,
-        sub,
-        order: workflowOrderForStageV4(stage, sub),
-        firstIndex: index,
-        tasks: []
-      });
-    }
-    map.get(key).tasks.push(task);
-  });
-  return [...map.values()].sort((a,b) => (a.order - b.order) || (a.firstIndex - b.firstIndex));
-}
-
-function statusForTaskSetV4(tasks){
-  tasks = toSafeArray(tasks);
-  if(!tasks.length) return "Pending";
-  if(tasks.every(t => t.status === "Done")) return "Done";
-  if(tasks.some(t => t.status === "In Progress")) return "In Progress";
-  return "To Do";
-}
-
-function currentLatestStageSummaryV4(project){
-  const groups = actualStageGroupsV4(project);
-  if(!groups.length){
-    return {
-      key:"", stage:"Not Started", sub:"-", tasks:[], status:"To Do", order:0,
-      pendingTasks:0, totalTasks:0, departments:"-", owners:"-"
-    };
-  }
-
-  const allDone = groups.every(g => g.tasks.length && g.tasks.every(t => t.status === "Done"));
-  let group = null;
-
-  if(allDone){
-    group = groups[groups.length - 1];
-  } else {
-    const active = groups.filter(g => g.tasks.some(t => t.status === "In Progress"));
-    group = active.length ? active[active.length - 1] : groups.find(g => !g.tasks.every(t => t.status === "Done"));
-  }
-
-  if(!group) group = groups[0];
-  const pendingTasks = group.tasks.filter(t => t.status !== "Done").length;
-  const depts = [...new Set(group.tasks.map(t => t.dept || "-").filter(Boolean))];
-  const owners = [...new Set(group.tasks.map(t => t.owner || "-").filter(Boolean))];
-
-  return {
-    ...group,
-    status: allDone ? "Completed" : statusForTaskSetV4(group.tasks),
-    pendingTasks,
-    totalTasks: group.tasks.length,
-    departments: depts.join("; ") || "-",
-    owners: owners.join("; ") || "-"
-  };
-}
-
-function stageDateValueV4(project, summary, field){
-  if(!project || !summary) return "";
-  const key = summary.key || stageDateKey(summary.stage, summary.sub);
-  const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : null;
-  const direct = rec ? normalizeDateForInput(rec[field]) : "";
-  if(direct) return direct;
-
-  const tasks = toSafeArray(summary.tasks);
-  const fallbackDates = tasks
-    .map(t => normalizeDateForInput(field === "actualDate" ? t.actualDate : (t.initialPlanningDate || t.dueDate)))
-    .filter(Boolean)
-    .sort();
-  if(!fallbackDates.length) return "";
-  return field === "actualDate" ? fallbackDates[fallbackDates.length - 1] : fallbackDates[0];
-}
-
-function projectMISValueV4(project, summary, keys, defaultValue="Pending"){
-  const tasks = toSafeArray(summary && summary.tasks);
-  for(const k of keys){
-    if(hasValue(project && project[k])) return project[k];
-  }
-  for(const t of tasks){
-    for(const k of keys){
-      if(hasValue(t && t[k])) return t[k];
-    }
-  }
-  return defaultValue;
-}
-
-function getMISLatestStageRowsV4(){
-  normalizeDBSafe();
-  return db.projects.map(project => {
-    project.tasks = toSafeArray(project.tasks);
-    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-    const s = quickTaskStatsV4(project);
-    const latest = currentLatestStageSummaryV4(project);
-    const planned = stageDateValueV4(project, latest, "initialPlanningDate");
-    const actual = stageDateValueV4(project, latest, "actualDate");
-    const overdue = planned && latest.status !== "Completed" && daysFromToday(planned) < 0;
-    const health = s.completion === 100 ? "Green" : (overdue ? "Red" : (latest.status === "In Progress" ? "Amber" : "Green"));
-
-    return {
-      projectName: project.name || "",
-      jobCode: project.jobCode || "",
-      client: project.client || "",
-      projectManager: project.manager || "",
-      overallStatus: project.overallStatus || "",
-      completion: s.completion + "%",
-      health,
-      currentStage: latest.stage || "",
-      currentSubStage: latest.sub || "",
-      stageStatus: latest.status || "",
-      departments: latest.departments || "-",
-      owners: latest.owners || "-",
-      pendingTasks: latest.pendingTasks || 0,
-      totalTasksInStage: latest.totalTasks || 0,
-      totalProjectTasks: s.total,
-      stagePlannedDate: formatDateDisplay(planned),
-      stageActualDate: formatDateDisplay(actual),
-      siteMom: projectMISValueV4(project, latest, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"]),
-      quality: projectMISValueV4(project, latest, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"]),
-      correspondence: projectMISValueV4(project, latest, ["correspondence", "mailStatus", "clientCorrespondence"]),
-      expense: projectMISValueV4(project, latest, ["expense", "expenseStatus", "siteExpense"]),
-      budget: hasValue(project.budget) ? project.budget : "Pending",
-      budgetDeviation: projectMISValueV4(project, latest, ["budgetDeviation", "deviation"], "No Deviation"),
-      billingStatus: projectMISValueV4(project, latest, ["billingStatus", "billing"]),
-      collectionStatus: projectMISValueV4(project, latest, ["collectionStatus", "collection"]),
-      customerFeedback: projectMISValueV4(project, latest, ["customerFeedback", "clientFeedback"])
-    };
-  });
-}
-
-function filteredMISLatestStageRowsV4(){
-  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
-  const dept=document.getElementById("misDeptFilter")?.value||"";
-  const st=document.getElementById("misStatusFilter")?.value||"";
-  let rows = getMISLatestStageRowsV4();
-  if(dept) rows = rows.filter(r => (r.departments || "").split(/;\s*/).includes(dept));
-  if(st) rows = rows.filter(r => r.stageStatus === st || (st === "Done" && r.stageStatus === "Completed"));
-  if(q) rows = rows.filter(r => Object.values(r).join(" ").toLowerCase().includes(q));
-  return rows;
-}
-
-renderMIS = function(){
-  return safeRender("Latest Stage MIS", () => {
-    const table=document.getElementById("misTable"); if(!table) return;
-    const rows = filteredMISLatestStageRowsV4();
-    setText("misRowsCount", rows.length);
-    setText("misMomPending", rows.filter(r=>r.siteMom==="Pending").length);
-    setText("misQualityPending", rows.filter(r=>r.quality==="Pending").length);
-    setText("misCorrespondencePending", rows.filter(r=>r.correspondence==="Pending").length);
-    setText("misExpensePending", rows.filter(r=>r.expense==="Pending").length);
-    setText("misBudgetDeviation", rows.filter(r=>r.budgetDeviation && !["Pending","No Deviation"].includes(r.budgetDeviation)).length);
-    setText("misBillingPending", rows.filter(r=>r.billingStatus==="Pending").length);
-    setText("misCollectionPending", rows.filter(r=>r.collectionStatus==="Pending").length);
-
-    let html=`<tr>
-      <th>Project</th><th>Job Code</th><th>Client</th><th>Project Manager</th><th>Completion</th><th>Health</th>
-      <th>Latest / Current Stage</th><th>Sub-stage</th><th>Stage Status</th><th>Departments</th><th>Owners</th>
-      <th>Pending Tasks in Stage</th><th>Total Tasks in Stage</th><th>Stage Planned Date</th><th>Stage Actual Date</th>
-      <th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th>
-    </tr>`;
-    html += rows.map(r=>`<tr>
-      <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.client)}</td><td>${esc(r.projectManager)}</td><td>${esc(r.completion)}</td><td>${esc(r.health)}</td>
-      <td>${esc(r.currentStage)}</td><td>${esc(r.currentSubStage)}</td><td>${esc(r.stageStatus)}</td><td>${esc(r.departments)}</td><td>${esc(r.owners)}</td>
-      <td>${esc(r.pendingTasks)}</td><td>${esc(r.totalTasksInStage)}</td><td>${esc(r.stagePlannedDate)}</td><td>${esc(r.stageActualDate)}</td>
-      <td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
-    </tr>`).join("");
-    table.innerHTML = html || "";
-  });
-};
-
-exportMISCSV = function(){
-  const rows = filteredMISLatestStageRowsV4();
-  const headers = [
-    "Project Name","Job Code","Client","Project Manager","Overall Status","Completion","Health",
-    "Latest / Current Stage","Sub-stage","Stage Status","Departments","Owners","Pending Tasks in Stage","Total Tasks in Stage","Total Project Tasks",
-    "Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"
-  ];
-  const data = rows.map(r => [
-    r.projectName,r.jobCode,r.client,r.projectManager,r.overallStatus,r.completion,r.health,
-    r.currentStage,r.currentSubStage,r.stageStatus,r.departments,r.owners,r.pendingTasks,r.totalTasksInStage,r.totalProjectTasks,
-    r.stagePlannedDate,r.stageActualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback
-  ]);
-  downloadFile("latest-stage-mis-summary.csv", csv([headers, ...data]), "text/csv");
-};
-
-function loadDashboardDetailsV4(){
-  __dashboardDetailsLoadedV4 = true;
-  const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
-  const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
-  safeRender("Department Progress", () => renderDepartmentDashboard());
-  safeRender("Stage Date Alerts", () => renderAlertsDashboard());
-  safeRender("System Notifications", () => renderNotificationDashboard());
-  safeRender("Current Stage Tracker", () => renderCurrentStageTable(filtered));
-  const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
-  if(myOwner) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner));
-}
-
-renderDashboard = function(){
-  return safeRender("Fast Dashboard", () => {
-    normalizeDBSafe();
-    const token = ++__dashboardQuickTokenV4;
-    const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
-    const list=document.getElementById("projectsList"); if(!list) return;
-    const filtered = db.projects.filter(p => String((p.name||"")+(p.client||"")+(p.jobCode||"")+(p.location||"")+(p.manager||"")).toLowerCase().includes(q));
-    const allStats = db.projects.map(p => ({p, s:quickTaskStatsV4(p), latest:currentLatestStageSummaryV4(p)}));
-    const totalProjects=db.projects.length;
-    const completedProjects=allStats.filter(x=>x.s.completion===100).length;
-    const inProgressProjects=allStats.filter(x=>x.latest.status==="In Progress").length;
-    const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
-    setText("kpiProjects",totalProjects);
-    setText("kpiOnTrack",Math.max(totalProjects-completedProjects-inProgressProjects,0));
-    setText("kpiDelayedProjects","Load");
-    setText("kpiCompletedProjects",completedProjects);
-    setText("kpiCompletion",avg+"%");
-    setText("kpiOverdueTasks","Load");
-    setText("kpiDueToday","Load");
-    setText("kpiDueWeek","Load");
-    renderActivityFeed();
-
-    list.innerHTML = filtered.map(p=>{
-      const s=quickTaskStatsV4(p);
-      const latest=currentLatestStageSummaryV4(p);
-      const planned=stageDateValueV4(p, latest, "initialPlanningDate");
-      return `<div class="card project-card" onclick="openProject('${p.id}')">
-        <div class="toolbar"><h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>${healthBadge(s.health)}</div>
-        <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
-        <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
-        <div class="summary-line"><b>Latest Stage</b><span>${esc(latest.stage||"-")}</span></div>
-        <div class="summary-line"><b>Sub-stage</b><span>${esc(latest.sub||"-")}</span></div>
-        <div class="summary-line"><b>Stage Planned Date</b><span>${esc(formatDateDisplay(planned)||"-")}</span></div>
-        <div class="summary-line"><b>Stage Status</b><span>${esc(latest.status||"-")}</span></div>
-        <div class="bar"><span style="width:${s.completion}%"></span></div>
-        <p class="muted">${s.completion}% complete · ${latest.pendingTasks||0} pending in latest stage · ${s.total} total tasks</p>
-      </div>`;
-    }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
-
-    const loadButton = `<button class="small blue" onclick="loadDashboardDetailsV4()">Load detailed section</button>`;
-    const deptEl=document.getElementById("deptDashboard"); if(deptEl) deptEl.innerHTML=`<p class="muted">Detailed department progress is paused for faster loading.</p>${loadButton}`;
-    const alertEl=document.getElementById("alertDashboard"); if(alertEl) alertEl.innerHTML=`<p class="muted">Stage alerts are paused for faster loading.</p>${loadButton}`;
-    const notifEl=document.getElementById("notificationDashboard"); if(notifEl) notifEl.innerHTML=`<p class="muted">Notifications are paused for faster loading.</p>${loadButton}`;
-    const currentTable=document.getElementById("currentStageTable"); if(currentTable) currentTable.innerHTML=`<tr><td>Detailed current-stage tracker is paused for faster loading. ${loadButton}</td></tr>`;
-    const myTasks=document.getElementById("myTasksDashboard");
-    const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
-    if(myTasks){
-      if(myOwner) setTimeout(() => { if(token === __dashboardQuickTokenV4) safeRender("My Tasks", () => renderMyTasksDashboard(myOwner)); }, 10);
-      else myTasks.innerHTML='<p class="muted">Type owner name/email to see assigned tasks.</p>';
-    }
-  });
-};
-
-showMIS = function(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); };
-/* ===== END SPEED + LATEST-STAGE MIS PATCH V4 ===== */
-
-
-/* ===== STAGE-WISE MIS DATE PATCH V5 =====
-   Requirement:
-   - MIS Summary must show date of each stage/stage milestone, not all task rows.
-   - Export must remove: Client, Overall Status, Completion, Health, Latest/Current Stage,
-     Sub-stage, Stage Status, Departments, Owners, Pending/Total Task columns.
-   - Old task data remains untouched. This patch only changes MIS display/export.
-*/
-function projectFieldValueV5(project, keys, defaultValue="Pending"){
-  for(const key of keys){
-    if(hasValue(project && project[key])) return project[key];
-  }
-  return defaultValue;
-}
-
-function stageRecordValueV5(record, keys, defaultValue="Pending"){
-  for(const key of keys){
-    if(hasValue(record && record[key])) return record[key];
-  }
-  return defaultValue;
-}
-
-function getMISStageDateRowsV5(){
-  normalizeDBSafe();
-  const rows = [];
-
-  (db.projects || []).forEach(project => {
-    project.tasks = toSafeArray(project.tasks);
-    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-
-    // Ensures stage/sub-stage date records exist, without creating task rows or deleting task data.
-    if(typeof ensureStageDates === "function") ensureStageDates(project);
-
-    const groups = typeof getProjectStageGroups === "function" ? getProjectStageGroups(project) : [];
-    groups.forEach(group => {
-      const key = group.key || stageDateKey(group.stage, group.sub);
-      const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : { stage: group.stage, sub: group.sub };
-      const planned = normalizeDateForInput(rec.initialPlanningDate || rec.plannedDate || rec.targetDate || "");
-      const actual = normalizeDateForInput(rec.actualDate || rec.completedDate || "");
-      const stageItem = [group.stage || rec.stage || "", group.sub || rec.sub || ""].filter(Boolean).join(" - ");
-
-      rows.push({
-        projectName: project.name || "",
-        jobCode: project.jobCode || "",
-        projectManager: project.manager || "",
-        stageItem,
-        stagePlannedDate: formatDateDisplay(planned),
-        stageActualDate: formatDateDisplay(actual),
-        siteMom: stageRecordValueV5(rec, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"], projectFieldValueV5(project, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"])),
-        quality: stageRecordValueV5(rec, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"], projectFieldValueV5(project, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"])),
-        correspondence: stageRecordValueV5(rec, ["correspondence", "mailStatus", "clientCorrespondence"], projectFieldValueV5(project, ["correspondence", "mailStatus", "clientCorrespondence"])),
-        expense: stageRecordValueV5(rec, ["expense", "expenseStatus", "siteExpense"], projectFieldValueV5(project, ["expense", "expenseStatus", "siteExpense"])),
-        budget: projectFieldValueV5(project, ["budget"], "Pending"),
-        budgetDeviation: stageRecordValueV5(rec, ["budgetDeviation", "deviation"], projectFieldValueV5(project, ["budgetDeviation", "deviation"], "No Deviation")),
-        billingStatus: stageRecordValueV5(rec, ["billingStatus", "billing"], projectFieldValueV5(project, ["billingStatus", "billing"])),
-        collectionStatus: stageRecordValueV5(rec, ["collectionStatus", "collection"], projectFieldValueV5(project, ["collectionStatus", "collection"])),
-        customerFeedback: stageRecordValueV5(rec, ["customerFeedback", "clientFeedback"], projectFieldValueV5(project, ["customerFeedback", "clientFeedback"], ""))
-      });
-    });
-  });
-
-  return rows;
-}
-
-function filteredMISStageDateRowsV5(){
-  const q = (document.getElementById("misSearch")?.value || "").toLowerCase().trim();
-  let rows = getMISStageDateRowsV5();
-  if(q) rows = rows.filter(r => Object.values(r).join(" ").toLowerCase().includes(q));
-  return rows;
-}
-
-function applyMISStageDateUIV5(){
-  const title = document.querySelector("#misView h2");
-  if(title) title.textContent = "MIS / Stage Date Summary";
-  const note = document.querySelector("#misView .toolbar .muted");
-  if(note) note.textContent = "Stage-wise planned and actual dates. This summary does not show individual task date rows.";
-  const h3 = document.querySelector("#misView h3");
-  if(h3) h3.textContent = "Stage-wise MIS Date Data";
-  const search = document.getElementById("misSearch");
-  if(search) search.placeholder = "Search project, job code, manager, stage...";
-
-  // These filters were for task/latest-stage MIS. Hide them because stage-date MIS export no longer contains department/status/task columns.
-  const dept = document.getElementById("misDeptFilter");
-  if(dept) dept.style.display = "none";
-  const status = document.getElementById("misStatusFilter");
-  if(status) status.style.display = "none";
-}
-
-renderMIS = function(){
-  return safeRender("Stage-wise MIS Date Summary", () => {
-    applyMISStageDateUIV5();
-    const table = document.getElementById("misTable");
-    if(!table) return;
-    const rows = filteredMISStageDateRowsV5();
-
-    setText("misRowsCount", rows.length);
-    setText("misMomPending", rows.filter(r => r.siteMom === "Pending").length);
-    setText("misQualityPending", rows.filter(r => r.quality === "Pending").length);
-    setText("misCorrespondencePending", rows.filter(r => r.correspondence === "Pending").length);
-    setText("misExpensePending", rows.filter(r => r.expense === "Pending").length);
-    setText("misBudgetDeviation", rows.filter(r => r.budgetDeviation && !["Pending", "No Deviation"].includes(r.budgetDeviation)).length);
-    setText("misBillingPending", rows.filter(r => r.billingStatus === "Pending").length);
-    setText("misCollectionPending", rows.filter(r => r.collectionStatus === "Pending").length);
-
-    let html = `<tr>
-      <th>Project Name</th><th>Job Code</th><th>Project Manager</th><th>Stage / Milestone</th>
-      <th>Stage Planned Date</th><th>Stage Actual Date</th>
-      <th>Site Visits / MOM Report Status</th><th>Quality Checks Status</th><th>Correspondence</th><th>Expense</th>
-      <th>Budget</th><th>Budget Deviation</th><th>Billing Status</th><th>Collection Status</th><th>Customer Feedback</th>
-    </tr>`;
-
-    html += rows.map(r => `<tr>
-      <td>${esc(r.projectName)}</td><td>${esc(r.jobCode)}</td><td>${esc(r.projectManager)}</td><td>${esc(r.stageItem)}</td>
-      <td>${esc(r.stagePlannedDate)}</td><td>${esc(r.stageActualDate)}</td>
-      <td>${esc(r.siteMom)}</td><td>${esc(r.quality)}</td><td>${esc(r.correspondence)}</td><td>${esc(r.expense)}</td>
-      <td>${esc(r.budget)}</td><td>${esc(r.budgetDeviation)}</td><td>${esc(r.billingStatus)}</td><td>${esc(r.collectionStatus)}</td><td>${esc(r.customerFeedback)}</td>
-    </tr>`).join("");
-
-    table.innerHTML = html || "";
-  });
-};
-
-exportMISCSV = function(){
-  const rows = filteredMISStageDateRowsV5();
-  const headers = [
-    "Project Name", "Job Code", "Project Manager", "Stage / Milestone",
-    "Stage Planned Date", "Stage Actual Date",
-    "Site Visits / M.O.M Report Status", "Quality Checks Status", "Correspondence", "Expense",
-    "Budget", "Budget Deviation", "Billing Status", "Collection Status", "Customer Feedback"
-  ];
-  const data = rows.map(r => [
-    r.projectName, r.jobCode, r.projectManager, r.stageItem,
-    r.stagePlannedDate, r.stageActualDate,
-    r.siteMom, r.quality, r.correspondence, r.expense,
-    r.budget, r.budgetDeviation, r.billingStatus, r.collectionStatus, r.customerFeedback
-  ]);
-  downloadFile("stage-wise-mis-date-summary.csv", csv([headers, ...data]), "text/csv");
-};
-
-showMIS = function(){
-  setTab("misTab");
-  hideAll();
-  document.getElementById("misView").classList.remove("hidden");
-  renderMIS();
-};
-/* ===== END STAGE-WISE MIS DATE PATCH V5 ===== */
-
-
-/* ===== AUTO ACTUAL DATE LOCK PATCH V6 =====
-   Requirement:
-   - Stage Actual Date must be automatic only.
-   - Actual Date is calculated from the date when tasks are marked Done.
-   - Users/Admin/PM cannot manually edit Stage Actual Date from UI.
-   - MIS display/export uses the automatic stage actual date, not task rows and not manually entered dates.
-*/
-function localDateInputV6(dateObj){
-  const d = dateObj instanceof Date ? dateObj : new Date();
-  const local = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
-  return local.toISOString().slice(0,10);
-}
-
-function dateFromTaskDoneV6(task){
-  if(!task) return "";
-  return normalizeDateForInput(
-    task.doneDate ||
-    task.markedDoneDate ||
-    task.completedDate ||
-    task.doneAt ||
-    task.lastUpdated ||
-    ""
-  ) || "";
-}
-
-function stampTaskDoneDateV6(task, oldStatus, newStatus){
-  if(!task) return false;
-  let changed = false;
-  if(newStatus === "Done" && oldStatus !== "Done"){
-    task.doneDate = localDateInputV6();
-    task.doneAt = new Date().toISOString();
-    task.doneBy = currentUser || currentUserEmail || "Unknown User";
-    changed = true;
-  }
-  if(newStatus !== "Done" && oldStatus === "Done"){
-    task.reopenedAt = new Date().toISOString();
-    task.reopenedBy = currentUser || currentUserEmail || "Unknown User";
-    delete task.doneDate;
-    delete task.doneAt;
-    delete task.doneBy;
-    changed = true;
-  }
-  return changed;
-}
-
-function getStageAutoActualDateV6(project, stageOrGroup, sub){
-  if(!project) return "";
-  const stage = typeof stageOrGroup === "object" ? stageOrGroup.stage : stageOrGroup;
-  const subStage = typeof stageOrGroup === "object" ? stageOrGroup.sub : sub;
-  const tasks = getStageTasks(project, stage, subStage);
-  if(!tasks.length) return "";
-  if(!tasks.every(task => task.status === "Done")) return "";
-
-  const doneDates = tasks.map(dateFromTaskDoneV6).filter(Boolean).sort();
-  if(doneDates.length) return doneDates[doneDates.length - 1];
-
-  // Recovery fallback for older already-completed stages that do not have task doneDate yet.
-  const rec = getStageDateRecord(project, stage, subStage);
-  return normalizeDateForInput(rec.actualDate) || localDateInputV6();
-}
-
-function syncStageActualDateV6(project, stageOrGroup, sub){
-  if(!project) return false;
-  ensureStageDates(project);
-  const stage = typeof stageOrGroup === "object" ? stageOrGroup.stage : stageOrGroup;
-  const subStage = typeof stageOrGroup === "object" ? stageOrGroup.sub : sub;
-  const key = stageDateKey(stage, subStage);
-  const rec = project.stageDates[key];
-  if(!rec) return false;
-
-  const autoActual = getStageAutoActualDateV6(project, stage, subStage);
-  const oldActual = normalizeDateForInput(rec.actualDate) || "";
-  const wasAutoManaged = rec.actualDateSource === "auto" || rec.actualDateLocked === true;
-  let changed = false;
-
-  rec.actualDateLocked = true;
-
-  if(autoActual && (oldActual !== autoActual || rec.actualDateSource !== "auto")){
-    rec.actualDate = autoActual;
-    rec.actualDateSource = "auto";
-    rec.actualDateUpdatedAt = new Date().toISOString();
-    changed = true;
-  }
-
-  // If a stage is reopened after the system completed it, clear only the auto-generated date.
-  // Pre-existing/manual dates are not deleted for safety, but the UI/MIS ignores them unless the stage is actually complete.
-  if(!autoActual && wasAutoManaged && rec.actualDateSource === "auto" && oldActual){
-    rec.actualDate = "";
-    rec.actualDateUpdatedAt = new Date().toISOString();
-    changed = true;
-  }
-
-  return changed;
-}
-
-function syncAllStageActualDatesV6(project){
-  if(!project) return false;
-  ensureStageDates(project);
-  let changed = false;
-  getProjectStageGroups(project).forEach(group => {
-    if(syncStageActualDateV6(project, group)) changed = true;
-  });
-  return changed;
-}
-
-// Stage Actual Date is now system-controlled. Planned date remains editable by Admin/PM.
-const updateStageDateBeforeAutoLockV6 = updateStageDate;
-updateStageDate = function(projectId, key, field, value){
-  if(field === "actualDate"){
-    alert("Stage Actual Date is auto-filled when all tasks under this stage are marked Done. It cannot be edited manually.");
-    renderProject();
-    return;
-  }
-  return updateStageDateBeforeAutoLockV6(projectId, key, field, value);
-};
-
-renderStageDateTable = function(project){
-  const table = document.getElementById("stageDateTable");
-  if(!table) return;
-  ensureStageDates(project);
-  syncAllStageActualDatesV6(project);
-  const groups = getProjectStageGroups(project);
-  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Stage Planned Date</th><th>Stage Actual Date (Auto)</th><th>Stage Status</th><th>Pending Tasks</th></tr>`;
-  groups.forEach(group => {
-    const rec = getStageDateRecord(project, group.stage, group.sub);
-    const tasks = getStageTasks(project, group.stage, group.sub);
-    const pending = tasks.filter(t=>t.status!=="Done").length;
-    const completed = tasks.length > 0 && pending === 0;
-    const status = completed ? "Completed" : (tasks.some(t=>t.status==="In Progress") ? "In Progress" : "Pending");
-    const autoActual = getStageAutoActualDateV6(project, group);
-    const actualDisplay = autoActual ? formatDateDisplay(autoActual) : "Auto after all tasks Done";
-    html += `<tr>
-      <td>${esc(group.stage)}</td>
-      <td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><span class="pill" title="System generated from task Done dates. Manual editing is disabled.">${esc(actualDisplay)}</span></td>
-      <td>${esc(status)}</td>
-      <td>${pending}</td>
-    </tr>`;
-  });
-  table.innerHTML = html;
-};
-
-updateTaskField = function(projectId, taskId, field, value){
-  const p = (db.projects || []).find(x=>x.id===projectId); if(!p) return;
-  p.tasks = toSafeArray(p.tasks);
-  const t = p.tasks.find(x=>x.id===taskId); if(!t) return;
-  if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
-  if(field === "owner" && !(currentUserRole === "Admin" || currentUserRole === "PM")){
-    alert("Only Admin/PM can change owner."); renderProject(); return;
-  }
-
-  const oldValue = t[field] || "";
-  if(oldValue === value) return;
-  const oldStage = t.stage;
-  const oldSub = t.sub;
-  const oldStatus = t.status || "To Do";
-
-  t[field] = value;
-  if(field === "status") stampTaskDoneDateV6(t, oldStatus, value);
-  t.lastUpdated = new Date().toLocaleString();
-
-  const labelMap = {status:"Status", owner:"Owner"};
-  const details = `${labelMap[field]||field} changed from "${oldValue}" to "${value}"`;
-  addHistory(t,"Updated",details);
-  addGlobalActivity(p,t,"Task Updated",details);
-
-  syncStageActualDateV6(p, oldStage, oldSub);
-  syncStageActualDateV6(p, t.stage, t.sub);
-  save();
-};
-
-saveTask = function(id){
-  const p = (db.projects || []).find(x=>x.id===currentProjectId);
-  if(!p) return;
-  p.tasks = toSafeArray(p.tasks);
-  const data = {
-    stage:v("stage"), sub:v("sub"), technicalTask:v("technicalTask"), dept:document.getElementById("f_dept").value,
-    task:document.getElementById("f_task").value.trim(), owner:v("owner"), planning:v("planning"), visitorPerson:v("visitorPerson"),
-    siteReport:v("siteReport"), checkPoints:v("checkPoints"), checkingPerson:v("checkingPerson"), qualityCheckReport:v("qualityCheckReport"),
-    monthlyCorrespondence:v("monthlyCorrespondence"), budget:v("budget"), expensesIncurred:v("expensesIncurred"), plannedBilling:v("plannedBilling"),
-    actualBilling:v("actualBilling"), collection:v("collection"), status:document.getElementById("f_status").value,
-    remarks:document.getElementById("f_remarks").value.trim(), delayReason:document.getElementById("f_delayReason").value.trim(),
-    lastUpdated:new Date().toLocaleString()
-  };
-
-  if(id){
-    const task = p.tasks.find(t=>t.id===id);
-    if(!task) return;
-    const oldStage = task.stage;
-    const oldSub = task.sub;
-    const oldStatus = task.status || "To Do";
-    const changes = [];
-    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
-      if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
-    });
-    Object.assign(task, data);
-    stampTaskDoneDateV6(task, oldStatus, data.status);
-    syncStageActualDateV6(p, oldStage, oldSub);
-    syncStageActualDateV6(p, task.stage, task.sub);
-    if(changes.length){
-      const detailText = changes.join("; ");
-      addHistory(task,"Updated",detailText);
-      addGlobalActivity(p,task,"Task Updated",detailText);
-    }
-  } else {
-    const task = {id:uid(), ...data, history:[]};
-    stampTaskDoneDateV6(task, "To Do", task.status);
-    addHistory(task,"Created","Task manually added");
-    p.tasks.push(task);
-    syncStageActualDateV6(p, task.stage, task.sub);
-    addGlobalActivity(p,task,"Task Created","Task manually added");
-  }
-  closeModal();
-  save();
-};
-
-// Ensure Firebase saves also keep auto actual dates consistent.
-const saveBeforeAutoActualV6 = save;
-save = function(){
-  normalizeDBSafe();
-  (db.projects || []).forEach(project => syncAllStageActualDatesV6(project));
-  return saveBeforeAutoActualV6();
-};
-
-// Make MIS stage actual date use automatic completion date only.
-getMISStageDateRowsV5 = function(){
-  normalizeDBSafe();
-  const rows = [];
-
-  (db.projects || []).forEach(project => {
-    project.tasks = toSafeArray(project.tasks);
-    if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-    if(typeof ensureStageDates === "function") ensureStageDates(project);
-    syncAllStageActualDatesV6(project);
-
-    const groups = typeof getProjectStageGroups === "function" ? getProjectStageGroups(project) : [];
-    groups.forEach(group => {
-      const key = group.key || stageDateKey(group.stage, group.sub);
-      const rec = project.stageDates && project.stageDates[key] ? project.stageDates[key] : { stage: group.stage, sub: group.sub };
-      const planned = normalizeDateForInput(rec.initialPlanningDate || rec.plannedDate || rec.targetDate || "");
-      const autoActual = getStageAutoActualDateV6(project, group);
-      const stageItem = [group.stage || rec.stage || "", group.sub || rec.sub || ""].filter(Boolean).join(" - ");
-
-      rows.push({
-        projectName: project.name || "",
-        jobCode: project.jobCode || "",
-        projectManager: project.manager || "",
-        stageItem,
-        stagePlannedDate: formatDateDisplay(planned),
-        stageActualDate: autoActual ? formatDateDisplay(autoActual) : "",
-        siteMom: stageRecordValueV5(rec, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"], projectFieldValueV5(project, ["siteMom", "mom", "siteReport", "siteVisitReport", "momStatus", "siteMomStatus"])),
-        quality: stageRecordValueV5(rec, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"], projectFieldValueV5(project, ["quality", "qualityCheck", "qualityChecks", "qualityStatus"])),
-        correspondence: stageRecordValueV5(rec, ["correspondence", "mailStatus", "clientCorrespondence"], projectFieldValueV5(project, ["correspondence", "mailStatus", "clientCorrespondence"])),
-        expense: stageRecordValueV5(rec, ["expense", "expenseStatus", "siteExpense"], projectFieldValueV5(project, ["expense", "expenseStatus", "siteExpense"])),
-        budget: projectFieldValueV5(project, ["budget"], "Pending"),
-        budgetDeviation: stageRecordValueV5(rec, ["budgetDeviation", "deviation"], projectFieldValueV5(project, ["budgetDeviation", "deviation"], "No Deviation")),
-        billingStatus: stageRecordValueV5(rec, ["billingStatus", "billing"], projectFieldValueV5(project, ["billingStatus", "billing"])),
-        collectionStatus: stageRecordValueV5(rec, ["collectionStatus", "collection"], projectFieldValueV5(project, ["collectionStatus", "collection"])),
-        customerFeedback: stageRecordValueV5(rec, ["customerFeedback", "clientFeedback"], projectFieldValueV5(project, ["customerFeedback", "clientFeedback"], ""))
-      });
-    });
-  });
-
-  return rows;
-};
-
-/* ===== END AUTO ACTUAL DATE LOCK PATCH V6 ===== */
-
-
-/* ===== EDITABLE REMARKS + AUTOMATIC STAGE PLANNED DATE PATCH V7 =====
-   - Remarks and Delay Reason are editable directly in the task table.
-   - Blank stage planned dates are generated automatically between the
-     project Start Date and Target Completion Date.
-   - Existing manually entered stage planned dates are preserved.
-   - Stage Actual Date remains automatic when all tasks are marked Done.
-*/
-function addDaysV7(dateObj, days){
-  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
-function autoPopulateStagePlannedDatesV7(project){
-  if(!project) return false;
-  ensureStageDates(project);
-  const start = parseDateFlexible(project.startDate);
-  const target = parseDateFlexible(project.targetDate);
-  if(!start || !target || target < start) return false;
-
-  const groups = getProjectStageGroups(project);
-  if(!groups.length) return false;
-  const totalDays = Math.max(0, Math.round((target - start) / 86400000));
-  let changed = false;
-
-  groups.forEach((group, index) => {
-    const rec = project.stageDates[group.key];
-    if(!rec || normalizeDateForInput(rec.initialPlanningDate)) return;
-    const ratio = groups.length === 1 ? 1 : index / (groups.length - 1);
-    const offset = Math.round(totalDays * ratio);
-    rec.initialPlanningDate = localDateInputV6(addDaysV7(start, offset));
-    rec.plannedDateSource = "auto";
-    rec.plannedDateUpdatedAt = new Date().toISOString();
-    changed = true;
-  });
-  return changed;
-}
-
-renderStageDateTable = function(project){
-  const table = document.getElementById("stageDateTable");
-  if(!table) return;
-  ensureStageDates(project);
-  autoPopulateStagePlannedDatesV7(project);
-  syncAllStageActualDatesV6(project);
-  const groups = getProjectStageGroups(project);
-  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Stage Planned Date (Auto / Editable)</th><th>Stage Actual Date (Auto)</th><th>Stage Status</th><th>Pending Tasks</th></tr>`;
-  groups.forEach(group => {
-    const rec = getStageDateRecord(project, group.stage, group.sub);
-    const tasks = getStageTasks(project, group.stage, group.sub);
-    const pending = tasks.filter(t=>t.status!=="Done").length;
-    const completed = tasks.length > 0 && pending === 0;
-    const status = completed ? "Completed" : (tasks.some(t=>t.status==="In Progress") ? "In Progress" : "Pending");
-    const autoActual = getStageAutoActualDateV6(project, group);
-    const actualDisplay = autoActual ? formatDateDisplay(autoActual) : "Auto after all tasks Done";
-    html += `<tr>
-      <td>${esc(group.stage)}</td>
-      <td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><span class="pill" title="System generated after every task in this stage is Done.">${esc(actualDisplay)}</span></td>
-      <td>${esc(status)}</td>
-      <td>${pending}</td>
-    </tr>`;
-  });
-  table.innerHTML = html;
-};
-
-const saveBeforeAutoPlanV7 = save;
-save = function(){
-  normalizeDBSafe();
-  (db.projects || []).forEach(project => {
-    autoPopulateStagePlannedDatesV7(project);
-    syncAllStageActualDatesV6(project);
-  });
-  return saveBeforeAutoPlanV7();
-};
-
-/* ===== END EDITABLE REMARKS + AUTOMATIC STAGE PLANNED DATE PATCH V7 ===== */
-
-
-/* ===== RETROSPECTIVE + CONTINUOUS DATE SYNC PATCH V8 =====
-   - Recalculates every system-generated planned date whenever Start/Target dates change.
-   - Backfills planned dates for projects already stored in Firebase.
-   - Backfills actual completion dates for previously completed tasks from task history/last update.
-   - Continues updating actual dates whenever tasks are completed or reopened.
-   - A planned date manually changed by Admin/PM is preserved as manual.
-*/
-function dateOnlyFromAnyV8(value){
-  if(!value) return "";
-  const normalized = normalizeDateForInput(value);
-  if(normalized) return normalized;
-  const d = new Date(value);
-  return isNaN(d.getTime()) ? "" : localDateInputV6(d);
-}
-
-function historicalTaskDoneDateV8(task){
-  if(!task || task.status !== "Done") return "";
-  const direct = [task.doneDate, task.markedDoneDate, task.completedDate, task.doneAt]
-    .map(dateOnlyFromAnyV8).filter(Boolean).sort();
-  if(direct.length) return direct[direct.length - 1];
-
-  const history = Array.isArray(task.history) ? task.history : [];
-  const doneHistory = history.filter(h => {
-    const text = `${h?.action||""} ${h?.details||""}`.toLowerCase();
-    return text.includes('status') && (text.includes('to "done"') || text.includes("to 'done'") || text.includes('→ "done"') || text.includes('changed from') && text.includes('done'));
-  }).map(h => dateOnlyFromAnyV8(h.at)).filter(Boolean).sort();
-  if(doneHistory.length) return doneHistory[doneHistory.length - 1];
-
-  return dateOnlyFromAnyV8(task.lastUpdated);
-}
-
-function backfillTaskDoneDatesV8(project){
-  let changed = false;
-  (project?.tasks || []).forEach(task => {
-    if(task.status === "Done" && !dateOnlyFromAnyV8(task.doneDate || task.doneAt)){
-      const historical = historicalTaskDoneDateV8(task);
-      if(historical){
-        task.doneDate = historical;
-        task.doneAt = task.doneAt || `${historical}T12:00:00`;
-        task.doneBy = task.doneBy || "Retrospective Sync";
-        changed = true;
-      }
-    }
-  });
-  return changed;
-}
-
-// Replace the V7 implementation: auto-managed dates are recalculated, not merely filled once.
-autoPopulateStagePlannedDatesV7 = function(project){
-  if(!project) return false;
-  ensureStageDates(project);
-  const start = parseDateFlexible(project.startDate);
-  const target = parseDateFlexible(project.targetDate);
-  if(!start || !target || target < start) return false;
-
-  const groups = getProjectStageGroups(project);
-  if(!groups.length) return false;
-  const totalDays = Math.max(0, Math.round((target - start) / 86400000));
-  let changed = false;
-
-  groups.forEach((group, index) => {
-    const rec = project.stageDates[group.key];
-    if(!rec) return;
-
-    // Blank dates and dates previously generated by the system are always synchronized.
-    // Dates specifically edited by a user remain manual.
-    const current = normalizeDateForInput(rec.initialPlanningDate) || "";
-    const source = rec.plannedDateSource || (current ? "legacy" : "auto");
-    const shouldAutoManage = !current || source === "auto" || source === "system";
-    if(!shouldAutoManage) return;
-
-    const ratio = groups.length === 1 ? 1 : index / (groups.length - 1);
-    const offset = Math.round(totalDays * ratio);
-    const calculated = localDateInputV6(addDaysV7(start, offset));
-    if(current !== calculated || rec.plannedDateSource !== "auto"){
-      rec.initialPlanningDate = calculated;
-      rec.plannedDateSource = "auto";
-      rec.plannedDateUpdatedAt = new Date().toISOString();
-      changed = true;
-    }
-  });
-  return changed;
-};
-
-// Mark direct user changes to a planned date as manual so future recalculation does not overwrite them.
-const updateStageDateBeforeV8 = updateStageDate;
-updateStageDate = function(projectId, key, field, value){
-  if(field === "initialPlanningDate"){
-    if(!requirePermission(canEditProject(), "Only Admin/PM can update stage dates.")) return;
-    const project = (db.projects || []).find(x => x.id === projectId);
-    if(!project) return;
-    ensureStageDates(project);
-    const rec = project.stageDates[key];
-    if(!rec) return;
-    const cleanValue = normalizeDateForInput(value);
-    const oldValue = normalizeDateForInput(rec.initialPlanningDate) || "";
-    if(oldValue === cleanValue && rec.plannedDateSource === "manual") return;
-    rec.initialPlanningDate = cleanValue;
-    rec.plannedDateSource = cleanValue ? "manual" : "auto";
-    rec.plannedDateUpdatedAt = new Date().toISOString();
-    addGlobalActivity(project, {id:"", task:`${rec.stage} / ${rec.sub}`}, "Stage Date Updated", `Planned date changed from "${formatDateDisplay(oldValue)||"-"}" to "${formatDateDisplay(cleanValue)||"-"}"`);
-    save();
-    return;
-  }
-  return updateStageDateBeforeV8(projectId, key, field, value);
-};
-
-function syncProjectDatesV8(project){
-  let changed = false;
-  if(backfillTaskDoneDatesV8(project)) changed = true;
-  if(autoPopulateStagePlannedDatesV7(project)) changed = true;
-  if(syncAllStageActualDatesV6(project)) changed = true;
-  return changed;
-}
-
-// One-time retrospective migration after existing Firebase data is loaded.
-let retrospectiveDateSyncDoneV8 = false;
-const renderAllBeforeV8 = renderAll;
-renderAll = function(){
-  let changed = false;
-  normalizeDBSafe();
-  (db.projects || []).forEach(project => { if(syncProjectDatesV8(project)) changed = true; });
-  const result = renderAllBeforeV8();
-  if(changed && !retrospectiveDateSyncDoneV8){
-    retrospectiveDateSyncDoneV8 = true;
-    save();
-  }
-  return result;
-};
-
-// Continuous synchronization on every save for future changes.
-const saveBeforeV8 = save;
-save = function(){
-  normalizeDBSafe();
-  (db.projects || []).forEach(syncProjectDatesV8);
-  return saveBeforeV8();
-};
-
-/* ===== END RETROSPECTIVE + CONTINUOUS DATE SYNC PATCH V8 ===== */
-
-/* ===== SUB-STAGE-WISE DATE PATCH V9 =====
-   Dates are controlled independently for every Stage + Sub-stage combination.
-   No single common date is applied to the full stage.
-*/
-function getSubStageDateGroupsV9(project){
-  return getProjectStageGroups(project).map(group => ({...group}));
-}
-
-autoPopulateStagePlannedDatesV7 = function(project){
-  if(!project) return false;
-  ensureStageDates(project);
-  const start = parseDateFlexible(project.startDate);
-  const target = parseDateFlexible(project.targetDate);
-  if(!start || !target || target < start) return false;
-
-  const subStages = getSubStageDateGroupsV9(project);
-  if(!subStages.length) return false;
-  const totalDays = Math.max(0, Math.round((target - start) / 86400000));
-  let changed = false;
-
-  subStages.forEach((group, index) => {
-    const rec = project.stageDates[group.key];
-    if(!rec) return;
-    const current = normalizeDateForInput(rec.initialPlanningDate) || "";
-    const source = rec.plannedDateSource || (current ? "legacy" : "auto");
-    const shouldAutoManage = !current || source === "auto" || source === "system";
-    if(!shouldAutoManage) return;
-
-    const ratio = subStages.length === 1 ? 1 : index / (subStages.length - 1);
-    const calculated = localDateInputV6(addDaysV7(start, Math.round(totalDays * ratio)));
-    if(current !== calculated || rec.plannedDateSource !== "auto"){
-      rec.initialPlanningDate = calculated;
-      rec.plannedDateSource = "auto";
-      rec.plannedDateUpdatedAt = new Date().toISOString();
-      changed = true;
-    }
-  });
-  return changed;
-};
-
-renderStageDateTable = function(project){
-  const table = document.getElementById("stageDateTable");
-  if(!table) return;
-  ensureStageDates(project);
-  autoPopulateStagePlannedDatesV7(project);
-  syncAllStageActualDatesV6(project);
-  const subStages = getSubStageDateGroupsV9(project);
-
-  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date (Auto / Editable)</th><th>Sub-stage Actual Date (Auto)</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
-  subStages.forEach(group => {
-    const rec = getStageDateRecord(project, group.stage, group.sub);
-    const tasks = getStageTasks(project, group.stage, group.sub);
-    const pending = tasks.filter(t => t.status !== "Done").length;
-    const completed = tasks.length > 0 && pending === 0;
-    const status = completed ? "Completed" : (tasks.some(t => t.status === "In Progress") ? "In Progress" : "Pending");
-    const autoActual = getStageAutoActualDateV6(project, group);
-    const actualDisplay = autoActual ? formatDateDisplay(autoActual) : "Auto after all sub-stage tasks are Done";
-
-    html += `<tr>
-      <td>${esc(group.stage)}</td>
-      <td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><span class="pill" title="Generated when every task under this sub-stage is Done.">${esc(actualDisplay)}</span></td>
-      <td>${esc(status)}</td>
-      <td>${pending}</td>
-    </tr>`;
-  });
-  table.innerHTML = html;
-};
-
-/* ===== END SUB-STAGE-WISE DATE PATCH V9 ===== */
-
-
-/* ===== RELIABLE RETROSPECTIVE SUB-STAGE DATE SYNC PATCH V10 =====
-   Fixes:
-   1. Existing/legacy planned dates are converted to auto-managed dates unless explicitly marked manual.
-   2. Every Stage + Sub-stage record is recalculated retrospectively from project Start/Target dates.
-   3. A Sub-stage Actual Date is saved immediately when all tasks in that sub-stage become Done.
-   4. Existing completed sub-stages are backfilled from task history, lastUpdated, existing actual date,
-      or today's date only when no historical timestamp exists.
-*/
-function taskHistoricalDoneDateV10(task){
-  if(!task || task.status !== "Done") return "";
-  const candidates = [
-    task.doneDate, task.doneAt, task.markedDoneDate, task.completedDate,
-    task.completionDate, task.actualDate
-  ].map(dateOnlyFromAnyV8).filter(Boolean);
-
-  const history = Array.isArray(task.history) ? task.history : [];
-  history.forEach(h => {
-    const text = `${h?.action||""} ${h?.details||""}`.toLowerCase();
-    if(text.includes("done")){
-      const d = dateOnlyFromAnyV8(h?.at || h?.date || h?.timestamp);
-      if(d) candidates.push(d);
-    }
-  });
-
-  const updated = dateOnlyFromAnyV8(task.lastUpdated || task.updatedAt || task.modifiedAt);
-  if(updated) candidates.push(updated);
-  candidates.sort();
-  return candidates.length ? candidates[candidates.length - 1] : "";
-}
-
-function syncSubStageDatesV10(project){
-  if(!project) return false;
-  ensureStageDates(project);
-  const groups = getProjectStageGroups(project);
-  let changed = false;
-
-  // Retrospective + continuous planned-date calculation at Stage + Sub-stage level.
-  const start = parseDateFlexible(project.startDate);
-  const target = parseDateFlexible(project.targetDate);
-  if(start && target && target >= start && groups.length){
-    const totalDays = Math.max(0, Math.round((target - start) / 86400000));
-    groups.forEach((group, index) => {
-      const rec = project.stageDates[group.key];
-      if(!rec) return;
-      // Only dates explicitly edited after the manual-source feature was introduced stay protected.
-      const isManual = rec.plannedDateSource === "manual";
-      if(isManual) return;
-      const ratio = groups.length === 1 ? 1 : index / (groups.length - 1);
-      const calculated = localDateInputV6(addDaysV7(start, Math.round(totalDays * ratio)));
-      if(normalizeDateForInput(rec.initialPlanningDate) !== calculated || rec.plannedDateSource !== "auto"){
-        rec.initialPlanningDate = calculated;
-        rec.plannedDateSource = "auto";
-        rec.plannedDateUpdatedAt = new Date().toISOString();
-        changed = true;
-      }
-    });
-  }
-
-  // Retrospective + automatic actual date for each Stage + Sub-stage.
-  groups.forEach(group => {
-    const rec = project.stageDates[group.key];
-    if(!rec) return;
-    const tasks = getStageTasks(project, group.stage, group.sub);
-    const allDone = tasks.length > 0 && tasks.every(t => t.status === "Done");
-
-    if(allDone){
-      const recovered = [];
-      tasks.forEach(task => {
-        let d = taskHistoricalDoneDateV10(task);
-        if(!d) d = normalizeDateForInput(rec.actualDate) || "";
-        if(!d) d = localDateInputV6();
-        if(!dateOnlyFromAnyV8(task.doneDate)){
-          task.doneDate = d;
-          task.doneAt = task.doneAt || `${d}T12:00:00`;
-          task.doneBy = task.doneBy || "Retrospective Sync";
-          changed = true;
-        }
-        recovered.push(d);
-      });
-      recovered.sort();
-      const actual = recovered[recovered.length - 1];
-      if(normalizeDateForInput(rec.actualDate) !== actual || rec.actualDateSource !== "auto"){
-        rec.actualDate = actual;
-        rec.actualDateSource = "auto";
-        rec.actualDateLocked = true;
-        rec.actualDateUpdatedAt = new Date().toISOString();
-        changed = true;
-      }
-    } else if(rec.actualDateSource === "auto" && rec.actualDate){
-      rec.actualDate = "";
-      rec.actualDateUpdatedAt = new Date().toISOString();
-      changed = true;
-    }
-  });
-  return changed;
-}
-
-// Replace older sync entry points with the reliable sub-stage implementation.
-syncProjectDatesV8 = function(project){ return syncSubStageDatesV10(project); };
-syncAllStageActualDatesV6 = function(project){ return syncSubStageDatesV10(project); };
-
-// Keep automatic dates synchronized on every save.
-const saveBeforeV10 = save;
-let dateSyncSaveGuardV10 = false;
-save = function(){
-  normalizeDBSafe();
-  if(!dateSyncSaveGuardV10){
-    dateSyncSaveGuardV10 = true;
-    try { (db.projects || []).forEach(syncSubStageDatesV10); }
-    finally { dateSyncSaveGuardV10 = false; }
-  }
-  return saveBeforeV10();
-};
-
-// Run retrospective migration immediately after Firebase data is rendered and persist it once.
-const renderAllBeforeV10 = renderAll;
-let retrospectivePersistQueuedV10 = false;
-renderAll = function(){
-  normalizeDBSafe();
-  let changed = false;
-  (db.projects || []).forEach(p => { if(syncSubStageDatesV10(p)) changed = true; });
-  const result = renderAllBeforeV10();
-  if(changed && !retrospectivePersistQueuedV10){
-    retrospectivePersistQueuedV10 = true;
-    setTimeout(() => {
-      retrospectivePersistQueuedV10 = false;
-      save();
-    }, 0);
-  }
-  return result;
-};
-
-// Ensure the project screen shows freshly synchronized values immediately.
-const renderStageDateTableBeforeV10 = renderStageDateTable;
-renderStageDateTable = function(project){
-  syncSubStageDatesV10(project);
-  return renderStageDateTableBeforeV10(project);
-};
-
-/* ===== END RELIABLE RETROSPECTIVE SUB-STAGE DATE SYNC PATCH V10 ===== */
-
-
-/* ===== FINAL SUB-STAGE ACTUAL DATE ENGINE V11 =====
-   Actual date rule:
-   - Group tasks strictly by Stage + Sub-stage.
-   - Fill the Sub-stage Actual Date only when every task in that bucket is Done.
-   - Use the calendar date of the last task marked Done in that bucket.
-   - Backfill old completed buckets from task completion fields/history/lastUpdated.
-*/
-function parseDateTimeV11(value){
+function parseTaskTimestamp(value){
   if(!value) return null;
   if(value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  const s = String(value).trim();
-  if(!s) return null;
-
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-  if(m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]), Number(m[4]||0), Number(m[5]||0), Number(m[6]||0));
-
-  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
-  if(m){
-    let hour=Number(m[4]||0); const ap=(m[7]||'').toUpperCase();
-    if(ap==='PM' && hour<12) hour+=12;
-    if(ap==='AM' && hour===12) hour=0;
-    return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]), hour, Number(m[5]||0), Number(m[6]||0));
+  if(typeof value === "number"){
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d;
   }
-
-  const d = new Date(s);
+  const raw = String(value).trim();
+  if(!raw) return null;
+  const iso = new Date(raw);
+  if(!isNaN(iso.getTime())) return iso;
+  const m = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if(!m) return null;
+  let hour = Number(m[4] || 0);
+  const minute = Number(m[5] || 0);
+  const second = Number(m[6] || 0);
+  const ap = String(m[7] || "").toUpperCase();
+  if(ap === "PM" && hour < 12) hour += 12;
+  if(ap === "AM" && hour === 12) hour = 0;
+  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), hour, minute, second);
   return isNaN(d.getTime()) ? null : d;
 }
 
-function dateInputFromDateTimeV11(value){
-  const d = parseDateTimeV11(value);
-  return d ? localDateInputV6(d) : '';
+function dateInputFromTimestamp(value){
+  const d = parseTaskTimestamp(value);
+  if(!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
 }
 
-function historyDoneMomentsV11(task){
-  const moments=[];
-  (Array.isArray(task?.history) ? task.history : []).forEach(h=>{
-    const text=`${h?.action||''} ${h?.details||''}`.toLowerCase();
-    const showsDone = /status[^;]*[→>-]\s*["']?done\b/.test(text) ||
-      /marked\s+(as\s+)?done/.test(text) || /completed/.test(text) ||
-      (text.includes('done') && !text.includes('done to'));
-    if(!showsDone) return;
-    const d=parseDateTimeV11(h?.at || h?.date || h?.timestamp || h?.updatedAt);
-    if(d) moments.push(d);
+function taskCompletionMoment(task){
+  if(!task || cleanStatus(task.status) !== "done") return null;
+  const moments = [];
+  [task.doneAt, task.completedAt, task.completionTimestamp, task.updatedAt].forEach(v=>{
+    const d=parseTaskTimestamp(v); if(d) moments.push(d);
   });
-  return moments;
-}
-
-function taskDoneMomentV11(task){
-  if(!task || task.status !== 'Done') return null;
-  const direct=[task.doneAt, task.doneDate, task.markedDoneAt, task.markedDoneDate,
-    task.completedAt, task.completedDate, task.completionDate];
-  const moments=direct.map(parseDateTimeV11).filter(Boolean);
-  moments.push(...historyDoneMomentsV11(task));
+  (task.history || []).forEach(h=>{
+    const text = `${h?.action || ""} ${h?.details || ""}`.toLowerCase();
+    if(text.includes("done") || text.includes("completed")){
+      const d=parseTaskTimestamp(h?.at || h?.timestamp || h?.date || h?.updatedAt);
+      if(d) moments.push(d);
+    }
+  });
   if(!moments.length){
-    const fallback=parseDateTimeV11(task.lastUpdated || task.updatedAt || task.modifiedAt || task.createdAt);
+    const fallback=parseTaskTimestamp(task.lastUpdated || task.modifiedAt || task.createdAt);
     if(fallback) moments.push(fallback);
   }
   return moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : null;
 }
 
-function syncSubStageActualDatesV11(project){
+function stampTaskDoneTransition(task, oldStatus, newStatus){
+  const wasDone = cleanStatus(oldStatus) === "done";
+  const isDone = cleanStatus(newStatus) === "done";
+  if(!wasDone && isDone){
+    const now = new Date();
+    task.doneAt = now.toISOString();
+    task.doneDate = dateInputFromTimestamp(now);
+  } else if(wasDone && !isDone){
+    delete task.doneAt;
+    delete task.doneDate;
+    delete task.completedAt;
+    delete task.completionTimestamp;
+  }
+}
+
+function syncSubStageActualDate(project, stage, sub){
   if(!project) return false;
   ensureStageDates(project);
-  let changed=false;
+  const tasks = getStageTasks(project, stage, sub);
+  const rec = getStageDateRecord(project, stage, sub);
+  const allDone = tasks.length > 0 && tasks.every(t=>cleanStatus(t.status) === "done");
+  const oldDate = normalizeDateForInput(rec.actualDate) || "";
+  let newDate = "";
 
-  getProjectStageGroups(project).forEach(group=>{
-    const rec=project.stageDates[group.key];
-    if(!rec) return;
-    const tasks=getStageTasks(project, group.stage, group.sub);
-    const allDone=tasks.length>0 && tasks.every(t=>t.status==='Done');
-
-    if(allDone){
-      const moments=[];
+  if(allDone){
+    const moments = tasks.map(taskCompletionMoment).filter(Boolean).sort((a,b)=>a-b);
+    if(moments.length){
+      const lastMoment = moments[moments.length-1];
+      newDate = dateInputFromTimestamp(lastMoment);
       tasks.forEach(task=>{
-        let moment=taskDoneMomentV11(task);
-        if(!moment){
-          const existing=parseDateTimeV11(rec.actualDate);
-          moment=existing || new Date();
+        if(!task.doneAt){
+          const moment = taskCompletionMoment(task) || lastMoment;
+          task.doneAt = moment.toISOString();
+          task.doneDate = dateInputFromTimestamp(moment);
         }
-        moments.push(moment);
-        if(!task.doneAt){ task.doneAt=moment.toISOString(); changed=true; }
-        if(!task.doneDate){ task.doneDate=localDateInputV6(moment); changed=true; }
       });
-      const lastDone=moments.sort((a,b)=>a-b)[moments.length-1];
-      const actual=localDateInputV6(lastDone);
-      if(normalizeDateForInput(rec.actualDate)!==actual || rec.actualDateSource!=='auto-last-task-done'){
-        rec.actualDate=actual;
-        rec.actualDateSource='auto-last-task-done';
-        rec.actualDateLocked=true;
-        rec.actualDateUpdatedAt=new Date().toISOString();
-        changed=true;
-      }
-    } else if(rec.actualDateSource && String(rec.actualDateSource).startsWith('auto') && rec.actualDate){
-      rec.actualDate='';
-      rec.actualDateUpdatedAt=new Date().toISOString();
-      changed=true;
+    } else {
+      // Old completed records without any history/timestamp cannot reveal the true past date.
+      // Use the existing actual date when present; otherwise use today's migration date.
+      newDate = oldDate || today();
     }
+  }
+
+  if(oldDate !== newDate){
+    rec.actualDate = newDate;
+    rec.actualDateSource = newDate ? "automatic-last-task-done" : "";
+    rec.actualDateUpdatedAt = new Date().toISOString();
+    return true;
+  }
+  return false;
+}
+
+function syncAllSubStageActualDates(project){
+  if(!project) return false;
+  let changed = false;
+  getProjectStageGroups(project).forEach(group=>{
+    if(syncSubStageActualDate(project, group.stage, group.sub)) changed = true;
   });
   return changed;
 }
 
-// Safe synchronization entry points; no recursive call chain.
-syncAllStageActualDatesV6 = function(project){ return syncSubStageActualDatesV11(project); };
-syncProjectDatesV8 = function(project){
-  let changed=false;
-  if(typeof autoPopulateStagePlannedDatesV7==='function' && autoPopulateStagePlannedDatesV7(project)) changed=true;
-  if(syncSubStageActualDatesV11(project)) changed=true;
-  return changed;
+function persistDatabase(){
+  ensureUsers();
+  normalizeAllDates();
+  (db.projects || []).forEach(syncAllSubStageActualDates);
+  try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
+  if(firebaseReady && firebaseDBRef){
+    if(!firebase.auth().currentUser){
+      alert("Please login first. Firebase Authentication is required to save data.");
+      return Promise.reject(new Error("Not authenticated"));
+    }
+    return firebaseDBRef.set(db).then(()=>{ renderAll(); return true; }).catch(error=>{
+      console.error("Firebase save failed.", error);
+      alert("Could not save to Firebase. Please check Firebase Rules and internet connection.");
+      renderAll();
+      throw error;
+    });
+  }
+  renderAll();
+  return Promise.resolve(true);
+}
+
+save = function(){ return persistDatabase(); };
+
+updateTaskField = function(projectId, taskId, field, value){
+  const project = (db.projects || []).find(x=>x.id===projectId); if(!project) return;
+  const task = (project.tasks || []).find(x=>x.id===taskId); if(!task) return;
+  if(!canEditTask(task)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
+  if(field === "owner" && !(currentUserRole === "Admin" || currentUserRole === "PM")){
+    alert("Only Admin/PM can change owner."); renderProject(); return;
+  }
+  const oldValue = task[field] || "";
+  if(oldValue === value) return;
+  const oldStage = task.stage;
+  const oldSub = task.sub;
+  if(field === "status") stampTaskDoneTransition(task, oldValue, value);
+  task[field] = value;
+  task.lastUpdated = new Date().toISOString();
+  const details = `${field} changed from "${oldValue}" to "${value}"`;
+  addHistory(task, "Updated", details);
+  addGlobalActivity(project, task, "Task Updated", details);
+  syncSubStageActualDate(project, oldStage, oldSub);
+  syncSubStageActualDate(project, task.stage, task.sub);
+  persistDatabase();
 };
 
-getStageAutoActualDateV6 = function(project, stageOrGroup, sub){
-  if(!project) return '';
-  const stage=typeof stageOrGroup==='object' ? stageOrGroup.stage : stageOrGroup;
-  const subStage=typeof stageOrGroup==='object' ? stageOrGroup.sub : sub;
-  const tasks=getStageTasks(project, stage, subStage);
-  if(!tasks.length || !tasks.every(t=>t.status==='Done')) return '';
-  syncSubStageActualDatesV11(project);
-  const rec=getStageDateRecord(project, stage, subStage);
-  return normalizeDateForInput(rec.actualDate) || '';
+saveTask = function(id){
+  const project=(db.projects || []).find(x=>x.id===currentProjectId); if(!project) return;
+  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toISOString()};
+  if(id){
+    const task=(project.tasks || []).find(t=>t.id===id); if(!task) return;
+    const oldStage=task.stage, oldSub=task.sub, oldStatus=task.status;
+    stampTaskDoneTransition(task, oldStatus, data.status);
+    const changes=[];
+    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
+      if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
+    });
+    Object.assign(task,data);
+    if(changes.length){
+      const detailText=changes.join("; ");
+      addHistory(task,"Updated",detailText);
+      addGlobalActivity(project,task,"Task Updated",detailText);
+    }
+    syncSubStageActualDate(project,oldStage,oldSub);
+    syncSubStageActualDate(project,task.stage,task.sub);
+  } else {
+    const task={id:uid(),...data,history:[]};
+    stampTaskDoneTransition(task,"To Do",task.status);
+    addHistory(task,"Created","Task manually added");
+    project.tasks.push(task);
+    addGlobalActivity(project,task,"Task Created","Task manually added");
+    syncSubStageActualDate(project,task.stage,task.sub);
+  }
+  closeModal();
+  persistDatabase();
 };
 
 renderStageDateTable = function(project){
-  const table=document.getElementById('stageDateTable');
-  if(!table) return;
+  const table=document.getElementById("stageDateTable"); if(!table) return;
   ensureStageDates(project);
-  if(typeof autoPopulateStagePlannedDatesV7==='function') autoPopulateStagePlannedDatesV7(project);
-  syncSubStageActualDatesV11(project);
+  syncAllSubStageActualDates(project);
   const groups=getProjectStageGroups(project);
-  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date (Auto)</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
+  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
   groups.forEach(group=>{
-    const rec=getStageDateRecord(project, group.stage, group.sub);
-    const tasks=getStageTasks(project, group.stage, group.sub);
-    const pending=tasks.filter(t=>t.status!=='Done').length;
-    const completed=tasks.length>0 && pending===0;
-    const status=completed ? 'Completed' : (tasks.some(t=>t.status==='In Progress') ? 'In Progress' : 'Pending');
-    const actual=completed ? normalizeDateForInput(rec.actualDate) : '';
-    html+=`<tr>
-      <td>${esc(group.stage)}</td><td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><span class="pill" title="Date of the last task marked Done in this sub-stage.">${esc(actual ? formatDateDisplay(actual) : 'Auto after all tasks are Done')}</span></td>
-      <td>${esc(status)}</td><td>${pending}</td></tr>`;
+    const rec=getStageDateRecord(project,group.stage,group.sub);
+    const tasks=getStageTasks(project,group.stage,group.sub);
+    const pending=tasks.filter(t=>cleanStatus(t.status)!=="done").length;
+    const status=tasks.length && pending===0 ? "Completed" : (tasks.some(t=>cleanStatus(t.status)==="in progress") ? "In Progress" : "Pending");
+    html += `<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" readonly title="Automatically filled from the last task marked Done in this sub-stage"></td>
+      <td>${esc(status)}</td>
+      <td>${pending}</td>
+    </tr>`;
   });
   table.innerHTML=html;
 };
 
-// Replace layered save wrappers with one direct, reliable persistence function.
-save = function(){
-  ensureUsers();
-  normalizeAllDates();
-  (db.projects || []).forEach(project=>{
-    if(typeof autoPopulateStagePlannedDatesV7==='function') autoPopulateStagePlannedDatesV7(project);
-    syncSubStageActualDatesV11(project);
-  });
-
-  if(firebaseReady && firebaseDBRef){
-    if(!firebase.auth().currentUser){
-      alert('Please login first. Firebase Authentication is required to save data.');
-      return;
-    }
-    firebaseDBRef.set(db).then(()=>{
-      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
-      renderAll();
-    }).catch(error=>{
-      console.error('Firebase save failed.', error);
-      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
-      alert('Could not save to Firebase. Please check Firebase Rules, internet connection, and login status.');
-      renderAll();
-    });
-  } else {
-    localStorage.setItem('projectTrackerDB', JSON.stringify(db));
-    renderAll();
-  }
-};
-
-// On every Firebase/local render, backfill old completed sub-stages and persist once.
-const renderAllCoreV11 = renderAllBeforeV8 || renderAll;
-let retrospectiveSavingV11=false;
+const cleanRenderAllBase = renderAll;
+let cleanRetrospectiveWriteRunning = false;
 renderAll = function(){
-  normalizeDBSafe();
   let changed=false;
-  (db.projects || []).forEach(project=>{
-    if(typeof autoPopulateStagePlannedDatesV7==='function' && autoPopulateStagePlannedDatesV7(project)) changed=true;
-    if(syncSubStageActualDatesV11(project)) changed=true;
-  });
-  const result=renderAllCoreV11();
-  if(changed && !retrospectiveSavingV11){
-    retrospectiveSavingV11=true;
-    const finish=()=>{ retrospectiveSavingV11=false; };
+  (db.projects || []).forEach(project=>{ if(syncAllSubStageActualDates(project)) changed=true; });
+  const result=cleanRenderAllBase();
+  if(changed && !cleanRetrospectiveWriteRunning){
+    cleanRetrospectiveWriteRunning=true;
+    try { localStorage.setItem("projectTrackerDB",JSON.stringify(db)); } catch(e) {}
     if(firebaseReady && firebaseDBRef && firebase.auth().currentUser){
-      firebaseDBRef.set(db).then(()=>{
-        localStorage.setItem('projectTrackerDB', JSON.stringify(db));
-        finish();
-      }).catch(error=>{ console.error('Retrospective date save failed.',error); finish(); });
+      firebaseDBRef.set(db).catch(e=>console.error("Retrospective actual-date save failed",e)).finally(()=>{cleanRetrospectiveWriteRunning=false;});
     } else {
-      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
-      finish();
+      cleanRetrospectiveWriteRunning=false;
     }
   }
   return result;
 };
-
-/* ===== END FINAL SUB-STAGE ACTUAL DATE ENGINE V11 ===== */
-
-
-/* ===== DEFINITIVE SUB-STAGE ACTUAL DATE ENGINE V12 ===== */
-function normalizedStatusV12(value){
-  return String(value || '').trim().toLowerCase();
-}
-
-function parseAnyTaskMomentV12(value){
-  if(!value) return null;
-  if(value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  const s=String(value).trim();
-  if(!s) return null;
-
-  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?/);
-  if(m){
-    const native=new Date(s);
-    if(!isNaN(native.getTime())) return native;
-    return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]),Number(m[4]||0),Number(m[5]||0),Number(m[6]||0));
-  }
-
-  m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
-  if(m){
-    let h=Number(m[4]||0); const ap=String(m[7]||'').toUpperCase();
-    if(ap==='PM' && h<12) h+=12;
-    if(ap==='AM' && h===12) h=0;
-    return new Date(Number(m[3]),Number(m[2])-1,Number(m[1]),h,Number(m[5]||0),Number(m[6]||0));
-  }
-
-  const d=new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function doneMomentFromHistoryV12(task){
-  const hits=[];
-  (Array.isArray(task?.history) ? task.history : []).forEach(h=>{
-    const text=`${h?.action||''} ${h?.details||''}`.toLowerCase();
-    const toDone = /status\s+changed\s+from[\s\S]*?to\s+["']?done\b/.test(text) ||
-      /status[\s\S]*?[→>-]\s*["']?done\b/.test(text) ||
-      /marked\s+(as\s+)?done\b/.test(text);
-    if(!toDone) return;
-    const d=parseAnyTaskMomentV12(h?.at || h?.timestamp || h?.date || h?.updatedAt);
-    if(d) hits.push(d);
-  });
-  return hits.length ? hits.sort((a,b)=>a-b)[hits.length-1] : null;
-}
-
-function taskDoneMomentV12(task){
-  if(!task || normalizedStatusV12(task.status)!=='done') return null;
-  const direct=[task.doneAt,task.completedAt,task.markedDoneAt,task.doneDate,task.completedDate,task.markedDoneDate]
-    .map(parseAnyTaskMomentV12).filter(Boolean);
-  const historyMoment=doneMomentFromHistoryV12(task);
-  if(historyMoment) direct.push(historyMoment);
-  if(!direct.length){
-    const fallback=parseAnyTaskMomentV12(task.lastUpdated || task.updatedAt || task.modifiedAt || task.createdAt);
-    if(fallback) direct.push(fallback);
-  }
-  return direct.length ? direct.sort((a,b)=>a-b)[direct.length-1] : null;
-}
-
-function stampDoneTransitionV12(task, oldStatus, newStatus){
-  const wasDone=normalizedStatusV12(oldStatus)==='done';
-  const isDone=normalizedStatusV12(newStatus)==='done';
-  if(isDone && !wasDone){
-    const now=new Date();
-    task.doneAt=now.toISOString();
-    task.doneDate=localDateInputV6(now);
-    task.doneBy=currentUser || currentUserEmail || 'Unknown User';
-  } else if(!isDone && wasDone){
-    delete task.doneAt; delete task.doneDate; delete task.doneBy;
-    task.reopenedAt=new Date().toISOString();
-  }
-}
-
-function syncOneSubStageActualV12(project, stage, sub){
-  if(!project) return false;
-  ensureStageDates(project);
-  const key=stageDateKey(stage,sub);
-  if(!project.stageDates[key]) project.stageDates[key]={stage,sub,initialPlanningDate:'',actualDate:''};
-  const rec=project.stageDates[key];
-  const tasks=(project.tasks||[]).filter(t=>canonicalTaskText(t.stage)===canonicalTaskText(stage) && canonicalTaskText(t.sub)===canonicalTaskText(sub));
-  const allDone=tasks.length>0 && tasks.every(t=>normalizedStatusV12(t.status)==='done');
-  let changed=false;
-
-  if(allDone){
-    const moments=tasks.map(taskDoneMomentV12).filter(Boolean);
-    // For old completed tasks with no usable timestamp, use the existing actual date,
-    // otherwise use today's date as the only honest recoverable fallback.
-    let last=moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : parseAnyTaskMomentV12(rec.actualDate);
-    if(!last) last=new Date();
-    const actual=localDateInputV6(last);
-    if(normalizeDateForInput(rec.actualDate)!==actual || rec.actualDateSource!=='auto-last-task-done-v12'){
-      rec.actualDate=actual;
-      rec.actualDateSource='auto-last-task-done-v12';
-      rec.actualDateLocked=true;
-      rec.actualDateUpdatedAt=new Date().toISOString();
-      changed=true;
-    }
-    tasks.forEach(t=>{
-      if(!t.doneAt){ const d=taskDoneMomentV12(t) || last; t.doneAt=d.toISOString(); changed=true; }
-      if(!t.doneDate){ t.doneDate=localDateInputV6(parseAnyTaskMomentV12(t.doneAt)||last); changed=true; }
-    });
-  } else if(rec.actualDate && String(rec.actualDateSource||'').startsWith('auto')){
-    rec.actualDate='';
-    rec.actualDateUpdatedAt=new Date().toISOString();
-    changed=true;
-  }
-  return changed;
-}
-
-function syncAllSubStageActualV12(project){
-  if(!project) return false;
-  let changed=false;
-  const seen=new Set();
-  (project.tasks||[]).forEach(t=>{
-    const key=stageDateKey(t.stage,t.sub);
-    if(seen.has(key)) return;
-    seen.add(key);
-    if(syncOneSubStageActualV12(project,t.stage,t.sub)) changed=true;
-  });
-  return changed;
-}
-
-syncSubStageActualDatesV11=syncAllSubStageActualV12;
-syncAllStageActualDatesV6=syncAllSubStageActualV12;
-getStageAutoActualDateV6=function(project,stageOrGroup,sub){
-  const stage=typeof stageOrGroup==='object'?stageOrGroup.stage:stageOrGroup;
-  const subStage=typeof stageOrGroup==='object'?stageOrGroup.sub:sub;
-  syncOneSubStageActualV12(project,stage,subStage);
-  const tasks=getStageTasks(project,stage,subStage);
-  if(!tasks.length || !tasks.every(t=>normalizedStatusV12(t.status)==='done')) return '';
-  return normalizeDateForInput(getStageDateRecord(project,stage,subStage).actualDate)||'';
-};
-
-updateTaskField=function(projectId,taskId,field,value){
-  const p=(db.projects||[]).find(x=>x.id===projectId); if(!p) return;
-  p.tasks=toSafeArray(p.tasks);
-  const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
-  if(!canEditTask(t)){ alert('You can only update tasks assigned to you.'); renderProject(); return; }
-  if(field==='owner' && !(currentUserRole==='Admin'||currentUserRole==='PM')){ alert('Only Admin/PM can change owner.'); renderProject(); return; }
-
-  const oldValue=t[field]||'';
-  if(String(oldValue)===String(value)) return;
-  const oldStage=t.stage, oldSub=t.sub, oldStatus=t.status||'To Do';
-  t[field]=value;
-  if(field==='status') stampDoneTransitionV12(t,oldStatus,value);
-  t.lastUpdated=new Date().toLocaleString('en-GB');
-  const details=`${field==='status'?'Status':field==='owner'?'Owner':field} changed from "${oldValue}" to "${value}"`;
-  addHistory(t,'Updated',details);
-  addGlobalActivity(p,t,'Task Updated',details);
-  syncOneSubStageActualV12(p,oldStage,oldSub);
-  syncOneSubStageActualV12(p,t.stage,t.sub);
-  save();
-};
-
-saveTask=function(id){
-  const p=(db.projects||[]).find(x=>x.id===currentProjectId); if(!p) return;
-  p.tasks=toSafeArray(p.tasks);
-  const data={
-    stage:v('stage'),sub:v('sub'),technicalTask:v('technicalTask'),dept:document.getElementById('f_dept').value,
-    task:document.getElementById('f_task').value.trim(),owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),
-    siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),
-    monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),
-    actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status').value,
-    remarks:document.getElementById('f_remarks').value.trim(),delayReason:document.getElementById('f_delayReason').value.trim(),
-    lastUpdated:new Date().toLocaleString('en-GB')
-  };
-  if(id){
-    const task=p.tasks.find(t=>t.id===id); if(!task) return;
-    const oldStage=task.stage, oldSub=task.sub, oldStatus=task.status||'To Do';
-    const changes=[];
-    ['stage','sub','dept','task','owner','status','remarks','delayReason'].forEach(k=>{ if((task[k]||'')!==(data[k]||'')) changes.push(`${k}: "${task[k]||''}" → "${data[k]||''}"`); });
-    Object.assign(task,data);
-    stampDoneTransitionV12(task,oldStatus,data.status);
-    if(changes.length){ const text=changes.join('; '); addHistory(task,'Updated',text); addGlobalActivity(p,task,'Task Updated',text); }
-    syncOneSubStageActualV12(p,oldStage,oldSub);
-    syncOneSubStageActualV12(p,task.stage,task.sub);
-  } else {
-    const task={id:uid(),...data,history:[]};
-    stampDoneTransitionV12(task,'To Do',task.status);
-    addHistory(task,'Created','Task manually added');
-    p.tasks.push(task);
-    syncOneSubStageActualV12(p,task.stage,task.sub);
-    addGlobalActivity(p,task,'Task Created','Task manually added');
-  }
-  closeModal(); save();
-};
-
-const saveV12Base=save;
-save=function(){
-  normalizeDBSafe();
-  (db.projects||[]).forEach(p=>syncAllSubStageActualV12(p));
-  return saveV12Base();
-};
-
-const renderAllV12Base=renderAll;
-let retrospectiveWriteV12=false;
-renderAll=function(){
-  normalizeDBSafe();
-  let changed=false;
-  (db.projects||[]).forEach(p=>{ if(syncAllSubStageActualV12(p)) changed=true; });
-  const result=renderAllV12Base();
-  if(changed && !retrospectiveWriteV12){
-    retrospectiveWriteV12=true;
-    const done=()=>{retrospectiveWriteV12=false;};
-    if(firebaseReady&&firebaseDBRef&&firebase.auth().currentUser){
-      firebaseDBRef.set(db).then(()=>{localStorage.setItem('projectTrackerDB',JSON.stringify(db));done();}).catch(e=>{console.error('V12 retrospective save failed',e);done();});
-    } else { localStorage.setItem('projectTrackerDB',JSON.stringify(db)); done(); }
-  }
-  return result;
-};
-/* ===== END DEFINITIVE SUB-STAGE ACTUAL DATE ENGINE V12 ===== */
+/* ===== END CLEAN SUB-STAGE DATE ENGINE ===== */
 
 initAuthState();
-
 </script>
-
 </body>
 </html>
