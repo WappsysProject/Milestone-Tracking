@@ -239,8 +239,8 @@
       <div class="card">
         <div class="toolbar">
           <div>
-            <h3 style="margin:0">Stage-wise Dates</h3>
-            <p class="muted" style="margin:4px 0 0">Task-level dates have been removed. Enter planned and actual dates at stage/sub-stage level; MIS Summary will use these dates.</p>
+            <h3 style="margin:0">Sub-stage-wise Dates</h3>
+            <p class="muted" style="margin:4px 0 0">Planned and actual dates are maintained separately for each sub-stage. MIS Summary will use these sub-stage dates.</p>
           </div>
         </div>
         <div class="table-scroll" style="overflow:auto;max-height:45vh;margin-top:12px">
@@ -3574,6 +3574,220 @@ save = function(){
 };
 
 /* ===== END RETROSPECTIVE + CONTINUOUS DATE SYNC PATCH V8 ===== */
+
+/* ===== SUB-STAGE-WISE DATE PATCH V9 =====
+   Dates are controlled independently for every Stage + Sub-stage combination.
+   No single common date is applied to the full stage.
+*/
+function getSubStageDateGroupsV9(project){
+  return getProjectStageGroups(project).map(group => ({...group}));
+}
+
+autoPopulateStagePlannedDatesV7 = function(project){
+  if(!project) return false;
+  ensureStageDates(project);
+  const start = parseDateFlexible(project.startDate);
+  const target = parseDateFlexible(project.targetDate);
+  if(!start || !target || target < start) return false;
+
+  const subStages = getSubStageDateGroupsV9(project);
+  if(!subStages.length) return false;
+  const totalDays = Math.max(0, Math.round((target - start) / 86400000));
+  let changed = false;
+
+  subStages.forEach((group, index) => {
+    const rec = project.stageDates[group.key];
+    if(!rec) return;
+    const current = normalizeDateForInput(rec.initialPlanningDate) || "";
+    const source = rec.plannedDateSource || (current ? "legacy" : "auto");
+    const shouldAutoManage = !current || source === "auto" || source === "system";
+    if(!shouldAutoManage) return;
+
+    const ratio = subStages.length === 1 ? 1 : index / (subStages.length - 1);
+    const calculated = localDateInputV6(addDaysV7(start, Math.round(totalDays * ratio)));
+    if(current !== calculated || rec.plannedDateSource !== "auto"){
+      rec.initialPlanningDate = calculated;
+      rec.plannedDateSource = "auto";
+      rec.plannedDateUpdatedAt = new Date().toISOString();
+      changed = true;
+    }
+  });
+  return changed;
+};
+
+renderStageDateTable = function(project){
+  const table = document.getElementById("stageDateTable");
+  if(!table) return;
+  ensureStageDates(project);
+  autoPopulateStagePlannedDatesV7(project);
+  syncAllStageActualDatesV6(project);
+  const subStages = getSubStageDateGroupsV9(project);
+
+  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date (Auto / Editable)</th><th>Sub-stage Actual Date (Auto)</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
+  subStages.forEach(group => {
+    const rec = getStageDateRecord(project, group.stage, group.sub);
+    const tasks = getStageTasks(project, group.stage, group.sub);
+    const pending = tasks.filter(t => t.status !== "Done").length;
+    const completed = tasks.length > 0 && pending === 0;
+    const status = completed ? "Completed" : (tasks.some(t => t.status === "In Progress") ? "In Progress" : "Pending");
+    const autoActual = getStageAutoActualDateV6(project, group);
+    const actualDisplay = autoActual ? formatDateDisplay(autoActual) : "Auto after all sub-stage tasks are Done";
+
+    html += `<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td><span class="pill" title="Generated when every task under this sub-stage is Done.">${esc(actualDisplay)}</span></td>
+      <td>${esc(status)}</td>
+      <td>${pending}</td>
+    </tr>`;
+  });
+  table.innerHTML = html;
+};
+
+/* ===== END SUB-STAGE-WISE DATE PATCH V9 ===== */
+
+
+/* ===== RELIABLE RETROSPECTIVE SUB-STAGE DATE SYNC PATCH V10 =====
+   Fixes:
+   1. Existing/legacy planned dates are converted to auto-managed dates unless explicitly marked manual.
+   2. Every Stage + Sub-stage record is recalculated retrospectively from project Start/Target dates.
+   3. A Sub-stage Actual Date is saved immediately when all tasks in that sub-stage become Done.
+   4. Existing completed sub-stages are backfilled from task history, lastUpdated, existing actual date,
+      or today's date only when no historical timestamp exists.
+*/
+function taskHistoricalDoneDateV10(task){
+  if(!task || task.status !== "Done") return "";
+  const candidates = [
+    task.doneDate, task.doneAt, task.markedDoneDate, task.completedDate,
+    task.completionDate, task.actualDate
+  ].map(dateOnlyFromAnyV8).filter(Boolean);
+
+  const history = Array.isArray(task.history) ? task.history : [];
+  history.forEach(h => {
+    const text = `${h?.action||""} ${h?.details||""}`.toLowerCase();
+    if(text.includes("done")){
+      const d = dateOnlyFromAnyV8(h?.at || h?.date || h?.timestamp);
+      if(d) candidates.push(d);
+    }
+  });
+
+  const updated = dateOnlyFromAnyV8(task.lastUpdated || task.updatedAt || task.modifiedAt);
+  if(updated) candidates.push(updated);
+  candidates.sort();
+  return candidates.length ? candidates[candidates.length - 1] : "";
+}
+
+function syncSubStageDatesV10(project){
+  if(!project) return false;
+  ensureStageDates(project);
+  const groups = getProjectStageGroups(project);
+  let changed = false;
+
+  // Retrospective + continuous planned-date calculation at Stage + Sub-stage level.
+  const start = parseDateFlexible(project.startDate);
+  const target = parseDateFlexible(project.targetDate);
+  if(start && target && target >= start && groups.length){
+    const totalDays = Math.max(0, Math.round((target - start) / 86400000));
+    groups.forEach((group, index) => {
+      const rec = project.stageDates[group.key];
+      if(!rec) return;
+      // Only dates explicitly edited after the manual-source feature was introduced stay protected.
+      const isManual = rec.plannedDateSource === "manual";
+      if(isManual) return;
+      const ratio = groups.length === 1 ? 1 : index / (groups.length - 1);
+      const calculated = localDateInputV6(addDaysV7(start, Math.round(totalDays * ratio)));
+      if(normalizeDateForInput(rec.initialPlanningDate) !== calculated || rec.plannedDateSource !== "auto"){
+        rec.initialPlanningDate = calculated;
+        rec.plannedDateSource = "auto";
+        rec.plannedDateUpdatedAt = new Date().toISOString();
+        changed = true;
+      }
+    });
+  }
+
+  // Retrospective + automatic actual date for each Stage + Sub-stage.
+  groups.forEach(group => {
+    const rec = project.stageDates[group.key];
+    if(!rec) return;
+    const tasks = getStageTasks(project, group.stage, group.sub);
+    const allDone = tasks.length > 0 && tasks.every(t => t.status === "Done");
+
+    if(allDone){
+      const recovered = [];
+      tasks.forEach(task => {
+        let d = taskHistoricalDoneDateV10(task);
+        if(!d) d = normalizeDateForInput(rec.actualDate) || "";
+        if(!d) d = localDateInputV6();
+        if(!dateOnlyFromAnyV8(task.doneDate)){
+          task.doneDate = d;
+          task.doneAt = task.doneAt || `${d}T12:00:00`;
+          task.doneBy = task.doneBy || "Retrospective Sync";
+          changed = true;
+        }
+        recovered.push(d);
+      });
+      recovered.sort();
+      const actual = recovered[recovered.length - 1];
+      if(normalizeDateForInput(rec.actualDate) !== actual || rec.actualDateSource !== "auto"){
+        rec.actualDate = actual;
+        rec.actualDateSource = "auto";
+        rec.actualDateLocked = true;
+        rec.actualDateUpdatedAt = new Date().toISOString();
+        changed = true;
+      }
+    } else if(rec.actualDateSource === "auto" && rec.actualDate){
+      rec.actualDate = "";
+      rec.actualDateUpdatedAt = new Date().toISOString();
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+// Replace older sync entry points with the reliable sub-stage implementation.
+syncProjectDatesV8 = function(project){ return syncSubStageDatesV10(project); };
+syncAllStageActualDatesV6 = function(project){ return syncSubStageDatesV10(project); };
+
+// Keep automatic dates synchronized on every save.
+const saveBeforeV10 = save;
+let dateSyncSaveGuardV10 = false;
+save = function(){
+  normalizeDBSafe();
+  if(!dateSyncSaveGuardV10){
+    dateSyncSaveGuardV10 = true;
+    try { (db.projects || []).forEach(syncSubStageDatesV10); }
+    finally { dateSyncSaveGuardV10 = false; }
+  }
+  return saveBeforeV10();
+};
+
+// Run retrospective migration immediately after Firebase data is rendered and persist it once.
+const renderAllBeforeV10 = renderAll;
+let retrospectivePersistQueuedV10 = false;
+renderAll = function(){
+  normalizeDBSafe();
+  let changed = false;
+  (db.projects || []).forEach(p => { if(syncSubStageDatesV10(p)) changed = true; });
+  const result = renderAllBeforeV10();
+  if(changed && !retrospectivePersistQueuedV10){
+    retrospectivePersistQueuedV10 = true;
+    setTimeout(() => {
+      retrospectivePersistQueuedV10 = false;
+      save();
+    }, 0);
+  }
+  return result;
+};
+
+// Ensure the project screen shows freshly synchronized values immediately.
+const renderStageDateTableBeforeV10 = renderStageDateTable;
+renderStageDateTable = function(project){
+  syncSubStageDatesV10(project);
+  return renderStageDateTableBeforeV10(project);
+};
+
+/* ===== END RELIABLE RETROSPECTIVE SUB-STAGE DATE SYNC PATCH V10 ===== */
 
 initAuthState();
 
