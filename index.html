@@ -3789,6 +3789,421 @@ renderStageDateTable = function(project){
 
 /* ===== END RELIABLE RETROSPECTIVE SUB-STAGE DATE SYNC PATCH V10 ===== */
 
+
+/* ===== FINAL SUB-STAGE ACTUAL DATE ENGINE V11 =====
+   Actual date rule:
+   - Group tasks strictly by Stage + Sub-stage.
+   - Fill the Sub-stage Actual Date only when every task in that bucket is Done.
+   - Use the calendar date of the last task marked Done in that bucket.
+   - Backfill old completed buckets from task completion fields/history/lastUpdated.
+*/
+function parseDateTimeV11(value){
+  if(!value) return null;
+  if(value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  const s = String(value).trim();
+  if(!s) return null;
+
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if(m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]), Number(m[4]||0), Number(m[5]||0), Number(m[6]||0));
+
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if(m){
+    let hour=Number(m[4]||0); const ap=(m[7]||'').toUpperCase();
+    if(ap==='PM' && hour<12) hour+=12;
+    if(ap==='AM' && hour===12) hour=0;
+    return new Date(Number(m[3]), Number(m[2])-1, Number(m[1]), hour, Number(m[5]||0), Number(m[6]||0));
+  }
+
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function dateInputFromDateTimeV11(value){
+  const d = parseDateTimeV11(value);
+  return d ? localDateInputV6(d) : '';
+}
+
+function historyDoneMomentsV11(task){
+  const moments=[];
+  (Array.isArray(task?.history) ? task.history : []).forEach(h=>{
+    const text=`${h?.action||''} ${h?.details||''}`.toLowerCase();
+    const showsDone = /status[^;]*[→>-]\s*["']?done\b/.test(text) ||
+      /marked\s+(as\s+)?done/.test(text) || /completed/.test(text) ||
+      (text.includes('done') && !text.includes('done to'));
+    if(!showsDone) return;
+    const d=parseDateTimeV11(h?.at || h?.date || h?.timestamp || h?.updatedAt);
+    if(d) moments.push(d);
+  });
+  return moments;
+}
+
+function taskDoneMomentV11(task){
+  if(!task || task.status !== 'Done') return null;
+  const direct=[task.doneAt, task.doneDate, task.markedDoneAt, task.markedDoneDate,
+    task.completedAt, task.completedDate, task.completionDate];
+  const moments=direct.map(parseDateTimeV11).filter(Boolean);
+  moments.push(...historyDoneMomentsV11(task));
+  if(!moments.length){
+    const fallback=parseDateTimeV11(task.lastUpdated || task.updatedAt || task.modifiedAt || task.createdAt);
+    if(fallback) moments.push(fallback);
+  }
+  return moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : null;
+}
+
+function syncSubStageActualDatesV11(project){
+  if(!project) return false;
+  ensureStageDates(project);
+  let changed=false;
+
+  getProjectStageGroups(project).forEach(group=>{
+    const rec=project.stageDates[group.key];
+    if(!rec) return;
+    const tasks=getStageTasks(project, group.stage, group.sub);
+    const allDone=tasks.length>0 && tasks.every(t=>t.status==='Done');
+
+    if(allDone){
+      const moments=[];
+      tasks.forEach(task=>{
+        let moment=taskDoneMomentV11(task);
+        if(!moment){
+          const existing=parseDateTimeV11(rec.actualDate);
+          moment=existing || new Date();
+        }
+        moments.push(moment);
+        if(!task.doneAt){ task.doneAt=moment.toISOString(); changed=true; }
+        if(!task.doneDate){ task.doneDate=localDateInputV6(moment); changed=true; }
+      });
+      const lastDone=moments.sort((a,b)=>a-b)[moments.length-1];
+      const actual=localDateInputV6(lastDone);
+      if(normalizeDateForInput(rec.actualDate)!==actual || rec.actualDateSource!=='auto-last-task-done'){
+        rec.actualDate=actual;
+        rec.actualDateSource='auto-last-task-done';
+        rec.actualDateLocked=true;
+        rec.actualDateUpdatedAt=new Date().toISOString();
+        changed=true;
+      }
+    } else if(rec.actualDateSource && String(rec.actualDateSource).startsWith('auto') && rec.actualDate){
+      rec.actualDate='';
+      rec.actualDateUpdatedAt=new Date().toISOString();
+      changed=true;
+    }
+  });
+  return changed;
+}
+
+// Safe synchronization entry points; no recursive call chain.
+syncAllStageActualDatesV6 = function(project){ return syncSubStageActualDatesV11(project); };
+syncProjectDatesV8 = function(project){
+  let changed=false;
+  if(typeof autoPopulateStagePlannedDatesV7==='function' && autoPopulateStagePlannedDatesV7(project)) changed=true;
+  if(syncSubStageActualDatesV11(project)) changed=true;
+  return changed;
+};
+
+getStageAutoActualDateV6 = function(project, stageOrGroup, sub){
+  if(!project) return '';
+  const stage=typeof stageOrGroup==='object' ? stageOrGroup.stage : stageOrGroup;
+  const subStage=typeof stageOrGroup==='object' ? stageOrGroup.sub : sub;
+  const tasks=getStageTasks(project, stage, subStage);
+  if(!tasks.length || !tasks.every(t=>t.status==='Done')) return '';
+  syncSubStageActualDatesV11(project);
+  const rec=getStageDateRecord(project, stage, subStage);
+  return normalizeDateForInput(rec.actualDate) || '';
+};
+
+renderStageDateTable = function(project){
+  const table=document.getElementById('stageDateTable');
+  if(!table) return;
+  ensureStageDates(project);
+  if(typeof autoPopulateStagePlannedDatesV7==='function') autoPopulateStagePlannedDatesV7(project);
+  syncSubStageActualDatesV11(project);
+  const groups=getProjectStageGroups(project);
+  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date (Auto)</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
+  groups.forEach(group=>{
+    const rec=getStageDateRecord(project, group.stage, group.sub);
+    const tasks=getStageTasks(project, group.stage, group.sub);
+    const pending=tasks.filter(t=>t.status!=='Done').length;
+    const completed=tasks.length>0 && pending===0;
+    const status=completed ? 'Completed' : (tasks.some(t=>t.status==='In Progress') ? 'In Progress' : 'Pending');
+    const actual=completed ? normalizeDateForInput(rec.actualDate) : '';
+    html+=`<tr>
+      <td>${esc(group.stage)}</td><td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td><span class="pill" title="Date of the last task marked Done in this sub-stage.">${esc(actual ? formatDateDisplay(actual) : 'Auto after all tasks are Done')}</span></td>
+      <td>${esc(status)}</td><td>${pending}</td></tr>`;
+  });
+  table.innerHTML=html;
+};
+
+// Replace layered save wrappers with one direct, reliable persistence function.
+save = function(){
+  ensureUsers();
+  normalizeAllDates();
+  (db.projects || []).forEach(project=>{
+    if(typeof autoPopulateStagePlannedDatesV7==='function') autoPopulateStagePlannedDatesV7(project);
+    syncSubStageActualDatesV11(project);
+  });
+
+  if(firebaseReady && firebaseDBRef){
+    if(!firebase.auth().currentUser){
+      alert('Please login first. Firebase Authentication is required to save data.');
+      return;
+    }
+    firebaseDBRef.set(db).then(()=>{
+      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
+      renderAll();
+    }).catch(error=>{
+      console.error('Firebase save failed.', error);
+      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
+      alert('Could not save to Firebase. Please check Firebase Rules, internet connection, and login status.');
+      renderAll();
+    });
+  } else {
+    localStorage.setItem('projectTrackerDB', JSON.stringify(db));
+    renderAll();
+  }
+};
+
+// On every Firebase/local render, backfill old completed sub-stages and persist once.
+const renderAllCoreV11 = renderAllBeforeV8 || renderAll;
+let retrospectiveSavingV11=false;
+renderAll = function(){
+  normalizeDBSafe();
+  let changed=false;
+  (db.projects || []).forEach(project=>{
+    if(typeof autoPopulateStagePlannedDatesV7==='function' && autoPopulateStagePlannedDatesV7(project)) changed=true;
+    if(syncSubStageActualDatesV11(project)) changed=true;
+  });
+  const result=renderAllCoreV11();
+  if(changed && !retrospectiveSavingV11){
+    retrospectiveSavingV11=true;
+    const finish=()=>{ retrospectiveSavingV11=false; };
+    if(firebaseReady && firebaseDBRef && firebase.auth().currentUser){
+      firebaseDBRef.set(db).then(()=>{
+        localStorage.setItem('projectTrackerDB', JSON.stringify(db));
+        finish();
+      }).catch(error=>{ console.error('Retrospective date save failed.',error); finish(); });
+    } else {
+      localStorage.setItem('projectTrackerDB', JSON.stringify(db));
+      finish();
+    }
+  }
+  return result;
+};
+
+/* ===== END FINAL SUB-STAGE ACTUAL DATE ENGINE V11 ===== */
+
+
+/* ===== DEFINITIVE SUB-STAGE ACTUAL DATE ENGINE V12 ===== */
+function normalizedStatusV12(value){
+  return String(value || '').trim().toLowerCase();
+}
+
+function parseAnyTaskMomentV12(value){
+  if(!value) return null;
+  if(value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  const s=String(value).trim();
+  if(!s) return null;
+
+  let m=s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?/);
+  if(m){
+    const native=new Date(s);
+    if(!isNaN(native.getTime())) return native;
+    return new Date(Number(m[1]),Number(m[2])-1,Number(m[3]),Number(m[4]||0),Number(m[5]||0),Number(m[6]||0));
+  }
+
+  m=s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if(m){
+    let h=Number(m[4]||0); const ap=String(m[7]||'').toUpperCase();
+    if(ap==='PM' && h<12) h+=12;
+    if(ap==='AM' && h===12) h=0;
+    return new Date(Number(m[3]),Number(m[2])-1,Number(m[1]),h,Number(m[5]||0),Number(m[6]||0));
+  }
+
+  const d=new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function doneMomentFromHistoryV12(task){
+  const hits=[];
+  (Array.isArray(task?.history) ? task.history : []).forEach(h=>{
+    const text=`${h?.action||''} ${h?.details||''}`.toLowerCase();
+    const toDone = /status\s+changed\s+from[\s\S]*?to\s+["']?done\b/.test(text) ||
+      /status[\s\S]*?[→>-]\s*["']?done\b/.test(text) ||
+      /marked\s+(as\s+)?done\b/.test(text);
+    if(!toDone) return;
+    const d=parseAnyTaskMomentV12(h?.at || h?.timestamp || h?.date || h?.updatedAt);
+    if(d) hits.push(d);
+  });
+  return hits.length ? hits.sort((a,b)=>a-b)[hits.length-1] : null;
+}
+
+function taskDoneMomentV12(task){
+  if(!task || normalizedStatusV12(task.status)!=='done') return null;
+  const direct=[task.doneAt,task.completedAt,task.markedDoneAt,task.doneDate,task.completedDate,task.markedDoneDate]
+    .map(parseAnyTaskMomentV12).filter(Boolean);
+  const historyMoment=doneMomentFromHistoryV12(task);
+  if(historyMoment) direct.push(historyMoment);
+  if(!direct.length){
+    const fallback=parseAnyTaskMomentV12(task.lastUpdated || task.updatedAt || task.modifiedAt || task.createdAt);
+    if(fallback) direct.push(fallback);
+  }
+  return direct.length ? direct.sort((a,b)=>a-b)[direct.length-1] : null;
+}
+
+function stampDoneTransitionV12(task, oldStatus, newStatus){
+  const wasDone=normalizedStatusV12(oldStatus)==='done';
+  const isDone=normalizedStatusV12(newStatus)==='done';
+  if(isDone && !wasDone){
+    const now=new Date();
+    task.doneAt=now.toISOString();
+    task.doneDate=localDateInputV6(now);
+    task.doneBy=currentUser || currentUserEmail || 'Unknown User';
+  } else if(!isDone && wasDone){
+    delete task.doneAt; delete task.doneDate; delete task.doneBy;
+    task.reopenedAt=new Date().toISOString();
+  }
+}
+
+function syncOneSubStageActualV12(project, stage, sub){
+  if(!project) return false;
+  ensureStageDates(project);
+  const key=stageDateKey(stage,sub);
+  if(!project.stageDates[key]) project.stageDates[key]={stage,sub,initialPlanningDate:'',actualDate:''};
+  const rec=project.stageDates[key];
+  const tasks=(project.tasks||[]).filter(t=>canonicalTaskText(t.stage)===canonicalTaskText(stage) && canonicalTaskText(t.sub)===canonicalTaskText(sub));
+  const allDone=tasks.length>0 && tasks.every(t=>normalizedStatusV12(t.status)==='done');
+  let changed=false;
+
+  if(allDone){
+    const moments=tasks.map(taskDoneMomentV12).filter(Boolean);
+    // For old completed tasks with no usable timestamp, use the existing actual date,
+    // otherwise use today's date as the only honest recoverable fallback.
+    let last=moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : parseAnyTaskMomentV12(rec.actualDate);
+    if(!last) last=new Date();
+    const actual=localDateInputV6(last);
+    if(normalizeDateForInput(rec.actualDate)!==actual || rec.actualDateSource!=='auto-last-task-done-v12'){
+      rec.actualDate=actual;
+      rec.actualDateSource='auto-last-task-done-v12';
+      rec.actualDateLocked=true;
+      rec.actualDateUpdatedAt=new Date().toISOString();
+      changed=true;
+    }
+    tasks.forEach(t=>{
+      if(!t.doneAt){ const d=taskDoneMomentV12(t) || last; t.doneAt=d.toISOString(); changed=true; }
+      if(!t.doneDate){ t.doneDate=localDateInputV6(parseAnyTaskMomentV12(t.doneAt)||last); changed=true; }
+    });
+  } else if(rec.actualDate && String(rec.actualDateSource||'').startsWith('auto')){
+    rec.actualDate='';
+    rec.actualDateUpdatedAt=new Date().toISOString();
+    changed=true;
+  }
+  return changed;
+}
+
+function syncAllSubStageActualV12(project){
+  if(!project) return false;
+  let changed=false;
+  const seen=new Set();
+  (project.tasks||[]).forEach(t=>{
+    const key=stageDateKey(t.stage,t.sub);
+    if(seen.has(key)) return;
+    seen.add(key);
+    if(syncOneSubStageActualV12(project,t.stage,t.sub)) changed=true;
+  });
+  return changed;
+}
+
+syncSubStageActualDatesV11=syncAllSubStageActualV12;
+syncAllStageActualDatesV6=syncAllSubStageActualV12;
+getStageAutoActualDateV6=function(project,stageOrGroup,sub){
+  const stage=typeof stageOrGroup==='object'?stageOrGroup.stage:stageOrGroup;
+  const subStage=typeof stageOrGroup==='object'?stageOrGroup.sub:sub;
+  syncOneSubStageActualV12(project,stage,subStage);
+  const tasks=getStageTasks(project,stage,subStage);
+  if(!tasks.length || !tasks.every(t=>normalizedStatusV12(t.status)==='done')) return '';
+  return normalizeDateForInput(getStageDateRecord(project,stage,subStage).actualDate)||'';
+};
+
+updateTaskField=function(projectId,taskId,field,value){
+  const p=(db.projects||[]).find(x=>x.id===projectId); if(!p) return;
+  p.tasks=toSafeArray(p.tasks);
+  const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
+  if(!canEditTask(t)){ alert('You can only update tasks assigned to you.'); renderProject(); return; }
+  if(field==='owner' && !(currentUserRole==='Admin'||currentUserRole==='PM')){ alert('Only Admin/PM can change owner.'); renderProject(); return; }
+
+  const oldValue=t[field]||'';
+  if(String(oldValue)===String(value)) return;
+  const oldStage=t.stage, oldSub=t.sub, oldStatus=t.status||'To Do';
+  t[field]=value;
+  if(field==='status') stampDoneTransitionV12(t,oldStatus,value);
+  t.lastUpdated=new Date().toLocaleString('en-GB');
+  const details=`${field==='status'?'Status':field==='owner'?'Owner':field} changed from "${oldValue}" to "${value}"`;
+  addHistory(t,'Updated',details);
+  addGlobalActivity(p,t,'Task Updated',details);
+  syncOneSubStageActualV12(p,oldStage,oldSub);
+  syncOneSubStageActualV12(p,t.stage,t.sub);
+  save();
+};
+
+saveTask=function(id){
+  const p=(db.projects||[]).find(x=>x.id===currentProjectId); if(!p) return;
+  p.tasks=toSafeArray(p.tasks);
+  const data={
+    stage:v('stage'),sub:v('sub'),technicalTask:v('technicalTask'),dept:document.getElementById('f_dept').value,
+    task:document.getElementById('f_task').value.trim(),owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),
+    siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),
+    monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),
+    actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status').value,
+    remarks:document.getElementById('f_remarks').value.trim(),delayReason:document.getElementById('f_delayReason').value.trim(),
+    lastUpdated:new Date().toLocaleString('en-GB')
+  };
+  if(id){
+    const task=p.tasks.find(t=>t.id===id); if(!task) return;
+    const oldStage=task.stage, oldSub=task.sub, oldStatus=task.status||'To Do';
+    const changes=[];
+    ['stage','sub','dept','task','owner','status','remarks','delayReason'].forEach(k=>{ if((task[k]||'')!==(data[k]||'')) changes.push(`${k}: "${task[k]||''}" → "${data[k]||''}"`); });
+    Object.assign(task,data);
+    stampDoneTransitionV12(task,oldStatus,data.status);
+    if(changes.length){ const text=changes.join('; '); addHistory(task,'Updated',text); addGlobalActivity(p,task,'Task Updated',text); }
+    syncOneSubStageActualV12(p,oldStage,oldSub);
+    syncOneSubStageActualV12(p,task.stage,task.sub);
+  } else {
+    const task={id:uid(),...data,history:[]};
+    stampDoneTransitionV12(task,'To Do',task.status);
+    addHistory(task,'Created','Task manually added');
+    p.tasks.push(task);
+    syncOneSubStageActualV12(p,task.stage,task.sub);
+    addGlobalActivity(p,task,'Task Created','Task manually added');
+  }
+  closeModal(); save();
+};
+
+const saveV12Base=save;
+save=function(){
+  normalizeDBSafe();
+  (db.projects||[]).forEach(p=>syncAllSubStageActualV12(p));
+  return saveV12Base();
+};
+
+const renderAllV12Base=renderAll;
+let retrospectiveWriteV12=false;
+renderAll=function(){
+  normalizeDBSafe();
+  let changed=false;
+  (db.projects||[]).forEach(p=>{ if(syncAllSubStageActualV12(p)) changed=true; });
+  const result=renderAllV12Base();
+  if(changed && !retrospectiveWriteV12){
+    retrospectiveWriteV12=true;
+    const done=()=>{retrospectiveWriteV12=false;};
+    if(firebaseReady&&firebaseDBRef&&firebase.auth().currentUser){
+      firebaseDBRef.set(db).then(()=>{localStorage.setItem('projectTrackerDB',JSON.stringify(db));done();}).catch(e=>{console.error('V12 retrospective save failed',e);done();});
+    } else { localStorage.setItem('projectTrackerDB',JSON.stringify(db)); done(); }
+  }
+  return result;
+};
+/* ===== END DEFINITIVE SUB-STAGE ACTUAL DATE ENGINE V12 ===== */
+
 initAuthState();
 
 </script>
