@@ -1153,7 +1153,9 @@ function load(){
 
         const mode = document.getElementById("storageMode");
         if(mode) mode.textContent = "Firebase Shared Database - initialized with Authentication";
-        if(applyCurrentUserRoleFromDB()) renderAll();
+        if(applyCurrentUserRoleFromDB()){
+          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
+        }
       } else {
         db = remoteData || {};
         if(!Array.isArray(db.projects)) db.projects = [];
@@ -1170,7 +1172,9 @@ function load(){
 
         const mode = document.getElementById("storageMode");
         if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication";
-        if(applyCurrentUserRoleFromDB()) renderAll();
+        if(applyCurrentUserRoleFromDB()){
+          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
+        }
       }
     }, error => {
       console.error("Firebase load failed.", error);
@@ -2353,22 +2357,43 @@ renderStageDateTable = function(project){
 };
 
 const cleanRenderAllBase = renderAll;
-let cleanRetrospectiveWriteRunning = false;
+
+// Rendering must be side-effect free. Never write to Firebase from renderAll(),
+// otherwise the Firebase value listener can create a read -> render -> write loop.
 renderAll = function(){
-  let changed=false;
-  (db.projects || []).forEach(project=>{ if(syncAllSubStageActualDates(project)) changed=true; });
-  const result=cleanRenderAllBase();
-  if(changed && !cleanRetrospectiveWriteRunning){
-    cleanRetrospectiveWriteRunning=true;
-    try { localStorage.setItem("projectTrackerDB",JSON.stringify(db)); } catch(e) {}
-    if(firebaseReady && firebaseDBRef && firebase.auth().currentUser){
-      firebaseDBRef.set(db).catch(e=>console.error("Retrospective actual-date save failed",e)).finally(()=>{cleanRetrospectiveWriteRunning=false;});
-    } else {
-      cleanRetrospectiveWriteRunning=false;
-    }
-  }
-  return result;
+  return cleanRenderAllBase();
 };
+
+let retrospectiveSyncCompleted = false;
+let retrospectiveSyncRunning = false;
+
+function runRetrospectiveSubStageSyncOnce(){
+  if(retrospectiveSyncCompleted || retrospectiveSyncRunning) return Promise.resolve(false);
+  retrospectiveSyncRunning = true;
+
+  let changed = false;
+  (db.projects || []).forEach(project => {
+    if(syncAllSubStageActualDates(project)) changed = true;
+  });
+
+  retrospectiveSyncCompleted = true;
+  retrospectiveSyncRunning = false;
+
+  try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
+
+  if(!changed || !firebaseReady || !firebaseDBRef || !firebase.auth().currentUser){
+    return Promise.resolve(changed);
+  }
+
+  // Write only once after initial Firebase data load. Do not call renderAll here;
+  // the existing Firebase listener will receive the saved data and render it.
+  return firebaseDBRef.set(db)
+    .then(() => true)
+    .catch(error => {
+      console.error("Retrospective actual-date save failed", error);
+      return false;
+    });
+}
 /* ===== END CLEAN SUB-STAGE DATE ENGINE ===== */
 
 initAuthState();
