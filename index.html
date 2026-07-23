@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Project Tracking Dashboard V16</title>
+  <title>Project Tracking Dashboard V17</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -108,7 +108,7 @@
     .table-scroll table{min-width:1200px}
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
 
-    /* V16 performance safeguards */
+    /* V17 performance safeguards */
     #taskTable tbody, #mobileTaskCards{contain:layout style paint}
     #taskTable tr, .mobile-task-card{content-visibility:auto;contain-intrinsic-size:48px}
     .task-pagination{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:10px}
@@ -355,7 +355,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V16 | Performance-first loading + reliable Sub-stage Actual Dates</div>
+<div class="footer">Project Tracker V17 | Fast loading + Actual Dates from Done Log / doneAt / Last Updated</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -376,7 +376,7 @@ let currentUserRole = "Viewer";
 let currentUserRecord = null;
 
 
-/* V16 runtime-only performance state. None of this is written to Firebase. */
+/* V17 runtime-only performance state. None of this is written to Firebase. */
 let projectRuntimeCache = new WeakMap();
 let stageDatePrepared = new WeakSet();
 let workflowGroupBlueprint = null;
@@ -913,7 +913,6 @@ function normalizeAllDates(){
     normalizeDateFields(project);
     (project.tasks||[]).forEach(task=>normalizeDateFields(task));
     ensureStageDates(project);
-    synchronizeAllProjectDates(project);
   });
 }
 
@@ -1241,13 +1240,20 @@ function readLocalDatabase(){
   if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
   if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates(); lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
+  ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates();
+  resetRuntimeCaches();
+  const migrated=migrateHistoricalCompletionData();
+  lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
+  return migrated;
 }
 
 function applyRemoteDatabase(remoteData){
   db=remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  resetRuntimeCaches(); ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates(); lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
+  resetRuntimeCaches(); ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates();
+  const migrated=migrateHistoricalCompletionData();
+  lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
+  return migrated;
 }
 
 function load(){
@@ -1274,9 +1280,12 @@ function load(){
       if(mode) mode.textContent='Local edits pending — remote update will be checked before save';
       return;
     }
-    applyRemoteDatabase(remoteData);
+    const migrated=applyRemoteDatabase(remoteData);
     if(mode) mode.textContent='Firebase Shared Database + Firebase Authentication';
     if(applyCurrentUserRoleFromDB()) scheduleActiveRender();
+    if(migrated){
+      setTimeout(()=>{ void persistDatabase({silent:true}); },0);
+    }
   },error=>{
     clearTimeout(timer); console.error('Firebase load failed',error);
     if(mode) mode.textContent='Browser backup active — Firebase connection failed';
@@ -1825,7 +1834,7 @@ function restoreBackup(event){
   const file=event.target.files[0]; if(!file) return;
   const reader=new FileReader();
   reader.onload=()=>{
-    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); normalizeAllDates(); ensureUsers(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
+    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); normalizeAllDates(); ensureUsers(); migrateHistoricalCompletionData(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
     catch(error){ alert('Invalid JSON backup.'); }
     finally{ event.target.value=''; }
   };
@@ -2097,14 +2106,15 @@ function exportMISCSV(){
 }
 /* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
 
-/* ===== PERFORMANCE + ACTUAL DATE ENGINE V16 =====
+/* ===== PERFORMANCE + AUTOMATIC ACTUAL DATE ENGINE V17 =====
    Design guarantees:
    - One implementation for each critical save/task/date/render function.
    - Rendering never mutates data and never writes to Firebase.
    - New Done transitions store an immutable completion timestamp.
    - Sub-stage Actual Date is set only when all tasks are Done.
-   - Old completed records without reliable timestamps require manual review.
-   - Manual historical dates are protected until a task is reopened.
+   - Old completed records use Done logs first, then doneAt, then Last Updated fallback.
+   - The chosen historical fallback is frozen into doneAt so later edits cannot move it.
+   - Manual historical corrections remain available and are protected until reopening.
    - Firebase writes are serialized and revision-checked to prevent silent lost updates.
 */
 
@@ -2117,17 +2127,42 @@ function parseTaskTimestamp(value){
   if(value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   const text=String(value).trim();
   if(!text) return null;
-  const native=new Date(text);
-  if(!Number.isNaN(native.getTime())) return native;
-  const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
-  if(!dmy) return null;
-  let hour=Number(dmy[4]||0);
-  const minute=Number(dmy[5]||0), second=Number(dmy[6]||0);
-  const ap=String(dmy[7]||'').toUpperCase();
-  if(ap==='PM' && hour<12) hour+=12;
-  if(ap==='AM' && hour===12) hour=0;
-  const date=new Date(Number(dmy[3]),Number(dmy[2])-1,Number(dmy[1]),hour,minute,second);
-  return Number.isNaN(date.getTime()) ? null : date;
+
+  // ISO / database formats are unambiguous and may include a timezone offset.
+  if(/^\d{4}-\d{2}-\d{2}(?:[T\s]|$)/.test(text)){
+    const isoDate=new Date(text);
+    if(!Number.isNaN(isoDate.getTime())) return isoDate;
+    const isoParts=text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if(isoParts){
+      const localDate=new Date(Number(isoParts[1]),Number(isoParts[2])-1,Number(isoParts[3]),Number(isoParts[4]||0),Number(isoParts[5]||0),Number(isoParts[6]||0));
+      if(!Number.isNaN(localDate.getTime())) return localDate;
+    }
+  }
+
+  // Historical logs were created with toLocaleString(). For this India-based tracker,
+  // ambiguous numeric dates are interpreted as DD/MM/YYYY. Values above 12 remove ambiguity.
+  const numeric=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[T,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if(numeric){
+    const first=Number(numeric[1]),second=Number(numeric[2]);
+    let day=first,month=second;
+    if(first<=12&&second>12){ month=first; day=second; }
+    // If both are <= 12, use DD/MM/YYYY as required for the tracker.
+    let hour=Number(numeric[4]||0);
+    const minute=Number(numeric[5]||0),secondValue=Number(numeric[6]||0);
+    const ap=String(numeric[7]||'').toUpperCase();
+    if(ap==='PM'&&hour<12) hour+=12;
+    if(ap==='AM'&&hour===12) hour=0;
+    const localDate=new Date(Number(numeric[3]),month-1,day,hour,minute,secondValue);
+    if(
+      !Number.isNaN(localDate.getTime())&&
+      localDate.getFullYear()===Number(numeric[3])&&
+      localDate.getMonth()===month-1&&
+      localDate.getDate()===day
+    ) return localDate;
+  }
+
+  const nativeDate=new Date(text);
+  return Number.isNaN(nativeDate.getTime()) ? null : nativeDate;
 }
 
 function dateInputFromTimestamp(value){
@@ -2139,30 +2174,124 @@ function dateInputFromTimestamp(value){
 function cleanStatus(value){ return String(value || '').trim().toLowerCase(); }
 function isDoneStatus(value){ return cleanStatus(value)==='done'; }
 function isManualActualDate(rec){
-  return ['manual-historical-v14','manual-historical-v15','manual-historical-v16'].includes(String(rec?.actualDateSource||''));
+  return String(rec?.actualDateSource||'').startsWith('manual-historical-v');
+}
+
+function historyEntryText(entry){
+  return [entry?.action,entry?.details,entry?.detail,entry?.description,entry?.message,entry?.change]
+    .filter(value=>value!==undefined&&value!==null)
+    .join(' ')
+    .toLowerCase();
+}
+
+function historyEntryMoment(entry){
+  return parseTaskTimestamp(entry?.at||entry?.timestamp||entry?.date||entry?.createdAt||entry?.updatedAt||entry?.time);
+}
+
+function isDoneTransitionHistory(entry){
+  const text=historyEntryText(entry);
+  if(!text) return false;
+  return (
+    /marked\s+(?:as\s+)?done/.test(text) ||
+    /task\s+(?:was\s+)?completed/.test(text) ||
+    /completed\s+task/.test(text) ||
+    (/status/.test(text) && (
+      /(?:changed|updated|set|moved|transitioned).*?(?:to|→)\s*["']?done\b/.test(text) ||
+      /(?:to|→)\s*["']?done\b/.test(text)
+    ))
+  );
+}
+
+function latestDoneHistoryMoment(task){
+  const moments=(Array.isArray(task?.history)?task.history:[])
+    .filter(isDoneTransitionHistory)
+    .map(historyEntryMoment)
+    .filter(Boolean)
+    .sort((a,b)=>a-b);
+  return moments.length?moments[moments.length-1]:null;
+}
+
+function taskCompletionEvidence(task){
+  if(!task||!isDoneStatus(task.status)) return {moment:null,source:'',label:'Unavailable'};
+
+  // Priority 1: the exact log entry where status was marked Done.
+  const historyMoment=latestDoneHistoryMoment(task);
+  if(historyMoment) return {moment:historyMoment,source:'done-log',label:'Done status log'};
+
+  // Priority 2: a stored completion timestamp created by this or an earlier tracker version.
+  const doneMoment=parseTaskTimestamp(
+    task.doneAt||task.completedAt||task.completionTimestamp||task.markedDoneAt||task.doneDate||task.completedDate
+  );
+  if(doneMoment){
+    const storedSource=String(task.doneTimestampSource||'').toLowerCase();
+    if(storedSource.includes('historical-last-updated')) return {moment:doneMoment,source:'last-updated',label:'Last Updated fallback'};
+    if(storedSource.includes('historical-done-log')) return {moment:doneMoment,source:'done-log',label:'Done status log'};
+    return {moment:doneMoment,source:'done-at',label:'Done timestamp'};
+  }
+
+  // Priority 3: historical fallback requested by the user.
+  // This value is migrated into doneAt once, preventing later non-status edits from moving the completion date.
+  const updatedMoment=parseTaskTimestamp(task.lastUpdated||task.updatedAt||task.modifiedAt);
+  if(updatedMoment) return {moment:updatedMoment,source:'last-updated',label:'Last Updated fallback'};
+
+  return {moment:null,source:'',label:'Unavailable'};
 }
 
 function reliableTaskCompletionMoment(task){
-  if(!task || !isDoneStatus(task.status)) return null;
-  const moments=[];
+  return taskCompletionEvidence(task).moment;
+}
 
-  // A direct timestamp is trusted only when it was created by a real status transition.
-  const source=String(task.doneTimestampSource||'').toLowerCase();
-  if(/^status-transition-v(?:14|15|16)$/.test(source)){
-    const direct=parseTaskTimestamp(task.doneAt);
-    if(direct) moments.push(direct);
-  }
+function completionSourceForRecord(source){
+  if(source==='done-log') return 'automatic-done-log-v17';
+  if(source==='last-updated') return 'automatic-last-updated-v17';
+  return 'automatic-done-at-v17';
+}
 
-  // Historical records are trusted only when the task history explicitly records completion.
-  (task.history||[]).forEach(entry=>{
-    const text=`${entry?.action||''} ${entry?.details||''}`.toLowerCase();
-    const recordsDone=(/status/.test(text) && /(?:to|→|changed.*to).*done/.test(text)) || /marked\s+(?:as\s+)?done/.test(text) || /task\s+completed/.test(text);
-    if(!recordsDone) return;
-    const date=parseTaskTimestamp(entry?.at||entry?.timestamp||entry?.date||entry?.updatedAt);
-    if(date) moments.push(date);
+function migrateHistoricalCompletionData(){
+  let changed=false;
+  (db.projects||[]).forEach(project=>{
+    let projectChanged=false;
+    (project.tasks||[]).forEach(task=>{
+      if(!isDoneStatus(task.status)) return;
+      const evidence=taskCompletionEvidence(task);
+      if(!evidence.moment) return;
+
+      const existingDoneAt=parseTaskTimestamp(task.doneAt);
+      if(!existingDoneAt){
+        task.doneAt=evidence.moment.toISOString();
+        task.doneTimestampSource=evidence.source==='done-log'
+          ?'historical-done-log-v17'
+          :'historical-last-updated-v17';
+        projectChanged=true;
+      }else if(!task.doneTimestampSource){
+        task.doneTimestampSource='historical-existing-done-at-v17';
+        projectChanged=true;
+      }
+
+      const expectedDoneDate=dateInputFromTimestamp(task.doneAt||evidence.moment);
+      if(expectedDoneDate&&task.doneDate!==expectedDoneDate){
+        task.doneDate=expectedDoneDate;
+        projectChanged=true;
+      }
+      if(!task.doneBy){
+        task.doneBy=evidence.source==='done-log'?'Recovered from task log':'Recovered from Last Updated';
+        projectChanged=true;
+      }
+    });
+
+    if(projectChanged){
+      invalidateProjectCache(project);
+      changed=true;
+    }
+    if(synchronizeAllProjectDates(project)) changed=true;
   });
 
-  return moments.length ? moments.sort((a,b)=>a-b).at(-1) : null;
+  if(changed){
+    if(!db.meta||typeof db.meta!=='object') db.meta={};
+    db.meta.actualDateMigrationVersion=17;
+    db.meta.actualDateMigrationAt=new Date().toISOString();
+  }
+  return changed;
 }
 
 function stampTaskDoneTransition(task,oldStatus,newStatus){
@@ -2172,7 +2301,7 @@ function stampTaskDoneTransition(task,oldStatus,newStatus){
     task.doneAt=now.toISOString();
     task.doneDate=dateInputFromTimestamp(now);
     task.doneBy=currentUser||currentUserEmail||'Unknown User';
-    task.doneTimestampSource='status-transition-v16';
+    task.doneTimestampSource='status-transition-v17';
     delete task.reopenedAt;
   }else if(wasDone && !isDone){
     ['doneAt','doneDate','doneBy','doneTimestampSource','completedAt','completionTimestamp','markedDoneAt'].forEach(key=>delete task[key]);
@@ -2185,10 +2314,21 @@ function deriveSubStageDateState(project,stage,sub){
   if(runtime.dateStates.has(key)) return runtime.dateStates.get(key);
   const tasks=runtime.tasksByGroup.get(key)||[];
   const allDone=tasks.length>0&&tasks.every(task=>isDoneStatus(task.status));
-  const moments=allDone?tasks.map(reliableTaskCompletionMoment):[];
-  const allReliable=allDone&&moments.length===tasks.length&&moments.every(Boolean);
-  const automaticDate=allReliable?dateInputFromTimestamp(moments.slice().sort((a,b)=>a-b).at(-1)):'';
-  const state={tasks,allDone,allReliable,automaticDate,pending:tasks.filter(task=>!isDoneStatus(task.status)).length};
+  const evidence=allDone?tasks.map(taskCompletionEvidence):[];
+  const allAvailable=allDone&&evidence.length===tasks.length&&evidence.every(item=>item.moment);
+  const sortedEvidence=allAvailable?evidence.slice().sort((a,b)=>a.moment-b.moment):[];
+  const latestEvidence=sortedEvidence.length?sortedEvidence[sortedEvidence.length-1]:null;
+  const automaticDate=latestEvidence?dateInputFromTimestamp(latestEvidence.moment):'';
+  const usesLastUpdatedFallback=evidence.some(item=>item.source==='last-updated');
+  const sourceCounts=evidence.reduce((counts,item)=>{
+    if(item.source) counts[item.source]=(counts[item.source]||0)+1;
+    return counts;
+  },{});
+  const state={
+    tasks,allDone,allAvailable,allReliable:allAvailable,automaticDate,latestEvidence,
+    usesLastUpdatedFallback,sourceCounts,
+    pending:tasks.filter(task=>!isDoneStatus(task.status)).length
+  };
   runtime.dateStates.set(key,state); return state;
 }
 
@@ -2196,10 +2336,25 @@ function synchronizeSubStageActualDate(project,stage,sub){
   ensureStageDates(project);
   const rec=getStageDateRecord(project,stage,sub); const state=deriveSubStageDateState(project,stage,sub);
   const before=`${rec.actualDate||''}|${rec.actualDateSource||''}|${!!rec.actualDateReviewRequired}`;
-  if(!state.allDone){ rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false; }
-  else if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){ rec.actualDateReviewRequired=false; }
-  else if(state.allReliable){ rec.actualDate=state.automaticDate; rec.actualDateSource='automatic-last-task-done-v16'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedBy='System'; }
-  else{ rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=true; }
+
+  if(!state.allDone){
+    rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false;
+  }else if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){
+    rec.actualDateReviewRequired=false;
+  }else if(state.allAvailable){
+    rec.actualDate=state.automaticDate;
+    rec.actualDateSource=completionSourceForRecord(state.latestEvidence?.source);
+    rec.actualDateReviewRequired=false;
+    rec.actualDateUpdatedBy='System';
+    rec.actualDateEvidence={
+      doneLog:Number(state.sourceCounts['done-log']||0),
+      doneAt:Number(state.sourceCounts['done-at']||0),
+      lastUpdated:Number(state.sourceCounts['last-updated']||0)
+    };
+  }else{
+    rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=true;
+  }
+
   const after=`${rec.actualDate||''}|${rec.actualDateSource||''}|${!!rec.actualDateReviewRequired}`;
   if(before!==after){ rec.actualDateUpdatedAt=new Date().toISOString(); return true; }
   return false;
@@ -2298,6 +2453,16 @@ function updateTaskField(projectId,taskId,field,value){
   const oldValue=task[field]||''; if(String(oldValue)===String(value)) return;
   const oldStage=task.stage,oldSub=task.sub; const structural=field==='stage'||field==='sub';
   if(field==='status'&&isDoneStatus(oldValue)&&!isDoneStatus(value)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)){ scheduleActiveRender('project'); return; }
+  // Freeze the old completion evidence before a non-status edit changes lastUpdated.
+  if(field!=='status'&&isDoneStatus(task.status)&&!parseTaskTimestamp(task.doneAt)){
+    const evidence=taskCompletionEvidence(task);
+    if(evidence.moment){
+      task.doneAt=evidence.moment.toISOString();
+      task.doneDate=dateInputFromTimestamp(evidence.moment);
+      task.doneTimestampSource=evidence.source==='done-log'?'historical-done-log-v17':'historical-last-updated-v17';
+      task.doneBy=task.doneBy||(evidence.source==='done-log'?'Recovered from task log':'Recovered from Last Updated');
+    }
+  }
   if(field==='status') stampTaskDoneTransition(task,oldValue,value);
   task[field]=value; task.lastUpdated=new Date().toISOString();
   const detail=`${field} changed from "${oldValue}" to "${value}"`; addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail);
@@ -2321,6 +2486,16 @@ function saveTask(id){
     if(!canFullEditTask(task)){ alert('You do not have permission to edit this task.'); return; }
     const oldStage=task.stage,oldSub=task.sub,oldStatus=task.status;
     if(isDoneStatus(oldStatus)&&!isDoneStatus(data.status)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)) return;
+    // Preserve the historical completion date before Full Edit changes lastUpdated.
+    if(isDoneStatus(oldStatus)&&isDoneStatus(data.status)&&!parseTaskTimestamp(task.doneAt)){
+      const evidence=taskCompletionEvidence(task);
+      if(evidence.moment){
+        task.doneAt=evidence.moment.toISOString();
+        task.doneDate=dateInputFromTimestamp(evidence.moment);
+        task.doneTimestampSource=evidence.source==='done-log'?'historical-done-log-v17':'historical-last-updated-v17';
+        task.doneBy=task.doneBy||(evidence.source==='done-log'?'Recovered from task log':'Recovered from Last Updated');
+      }
+    }
     stampTaskDoneTransition(task,oldStatus,data.status);
     const changes=[]; Object.keys(data).forEach(key=>{ if(key!=='lastUpdated'&&String(task[key]||'')!==String(data[key]||'')) changes.push(`${key}: "${task[key]||''}" → "${data[key]||''}"`); });
     const structural=task.stage!==data.stage||task.sub!==data.sub; Object.assign(task,data);
@@ -2341,7 +2516,7 @@ function setHistoricalActualDate(projectId,key,value){
   if(!state.allDone){ alert('The Actual Date can be entered only after every task in this Sub-stage is Done.'); scheduleActiveRender('project'); return; }
   const date=normalizeDateForInput(value); if(!date){ alert('Please select a valid Actual Date.'); scheduleActiveRender('project'); return; }
   if(date>today()){ alert('Actual Date cannot be in the future.'); scheduleActiveRender('project'); return; }
-  const old=normalizeDateForInput(rec.actualDate)||''; rec.actualDate=date; rec.actualDateSource='manual-historical-v16'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString(); rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
+  const old=normalizeDateForInput(rec.actualDate)||''; rec.actualDate=date; rec.actualDateSource='manual-historical-v17'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString(); rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
   addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Historical Actual Date Corrected',`Actual Date changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)}" by ${rec.actualDateUpdatedBy}`);
   invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase();
 }
@@ -2370,27 +2545,32 @@ function renderStageDateTable(project){
   let html='<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Date Mode</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>';
   groups.forEach(group=>{
     const rec=getStageDateRecord(project,group.stage,group.sub); const state=deriveSubStageDateState(project,group.stage,group.sub);
-    const manual=isManualActualDate(rec); const automatic=String(rec.actualDateSource||'').startsWith('automatic-last-task-done-v');
+    const manual=isManualActualDate(rec); const automatic=String(rec.actualDateSource||'').startsWith('automatic-');
     const status=state.allDone?'Completed':(state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
-    const needsManual=state.allDone&&!state.allReliable&&!manual; let actualCell,mode;
+    const needsManual=state.allDone&&!state.allAvailable&&!manual; let actualCell,mode;
     if(state.allDone&&(manual||needsManual)){
       actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||'')}" ${editable?'':'disabled'} onchange="setHistoricalActualDate('${project.id}','${escAttr(group.key)}',this.value)" title="Historical completion date">${manual&&editable?`<button type="button" onclick="resetActualDateToAuto('${project.id}','${escAttr(group.key)}')">Reset Auto</button>`:''}</div>`;
       mode=manual?'Manual':'Manual date required';
     }else{
-      actualCell=`<input class="inline-input" type="date" value="${escAttr(automatic?(normalizeDateForInput(rec.actualDate)||''):state.automaticDate)}" readonly title="Automatically calculated from the latest reliable task completion timestamp">`;
-      mode=state.allDone?(state.allReliable?'Auto':'Manual date required'):'Not completed';
+      const autoTitle=state.usesLastUpdatedFallback?'Automatically calculated using Done logs / doneAt, with Last Updated fallback for historical tasks':'Automatically calculated from Done-status logs and stored Done timestamps';
+      actualCell=`<input class="inline-input" type="date" value="${escAttr(automatic?(normalizeDateForInput(rec.actualDate)||''):state.automaticDate)}" readonly title="${escAttr(autoTitle)}">`;
+      mode=state.allDone?(state.allAvailable?(state.usesLastUpdatedFallback?'Auto (Last Updated fallback)':'Auto (Done log/time)'):'Manual date required'):'Not completed';
     }
     html+=`<tr><td>${esc(group.stage)}</td><td>${esc(group.sub)}</td><td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td><td>${actualCell}</td><td><span class="pill">${esc(mode)}</span></td><td>${esc(status)}</td><td>${state.pending}</td></tr>`;
   }); table.innerHTML=html;
 }
 
 function runRetrospectiveSubStageSyncOnce(){
-  // Intentionally read-only on load. Historical records are reviewed in the UI,
-  // and changes are persisted only after an explicit user action.
+  const changed=migrateHistoricalCompletionData();
+  if(changed){
+    scheduleLocalBackup();
+    scheduleActiveRender();
+    return persistDatabase({silent:true}).then(()=>true);
+  }
   return Promise.resolve(false);
 }
 
-/* ===== END PERFORMANCE + ACTUAL DATE ENGINE V16 ===== */
+/* ===== END PERFORMANCE + AUTOMATIC ACTUAL DATE ENGINE V17 ===== */
 
 async function bootstrapProjectTracker(){
   showLoginScreen();
