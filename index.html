@@ -2394,6 +2394,267 @@ function runRetrospectiveSubStageSyncOnce(){
       return false;
     });
 }
+
+
+/* ===== FINAL MANUAL + AUTOMATIC ACTUAL DATE ENGINE V13 =====
+   Rules:
+   1. New Done transitions always store doneAt/doneDate immediately.
+   2. A Sub-stage Actual Date is automatic only after every task is Done.
+   3. Automatic date = latest reliable Done timestamp in that Sub-stage.
+   4. Old completed Sub-stages without a reliable timestamp remain blank and
+      are flagged "Manual date required" instead of incorrectly using today.
+   5. Admin/PM may set a historical Actual Date manually and may later reset it
+      to automatic calculation.
+   6. renderAll remains read-only; Firebase writes occur only from explicit saves
+      or the one-time retrospective migration.
+*/
+
+function hasReliableDoneEvidenceV13(task){
+  if(!task || cleanStatus(task.status)!=="done") return false;
+  if(task.doneTimestampSource==="status-transition-v13") return true;
+  if(task.doneAt || task.completedAt || task.completionTimestamp || task.markedDoneAt) return true;
+  return (task.history || []).some(h=>{
+    const text=`${h?.action||""} ${h?.details||""}`.toLowerCase();
+    return /(?:status.*(?:to|→).*done|marked.*done|completed)/.test(text) &&
+      !!parseTaskTimestamp(h?.at || h?.timestamp || h?.date || h?.updatedAt);
+  });
+}
+
+function reliableTaskCompletionMomentV13(task){
+  if(!task || cleanStatus(task.status)!=="done") return null;
+  const moments=[];
+  [task.doneAt,task.completedAt,task.completionTimestamp,task.markedDoneAt].forEach(v=>{
+    const d=parseTaskTimestamp(v); if(d) moments.push(d);
+  });
+  (task.history || []).forEach(h=>{
+    const text=`${h?.action||""} ${h?.details||""}`.toLowerCase();
+    if(/(?:status.*(?:to|→).*done|marked.*done|completed)/.test(text)){
+      const d=parseTaskTimestamp(h?.at || h?.timestamp || h?.date || h?.updatedAt);
+      if(d) moments.push(d);
+    }
+  });
+  return moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : null;
+}
+
+stampTaskDoneTransition = function(task, oldStatus, newStatus){
+  const wasDone=cleanStatus(oldStatus)==="done";
+  const isDone=cleanStatus(newStatus)==="done";
+  if(!wasDone && isDone){
+    const now=new Date();
+    task.doneAt=now.toISOString();
+    task.doneDate=dateInputFromTimestamp(now);
+    task.doneBy=currentUser || currentUserEmail || "Unknown User";
+    task.doneTimestampSource="status-transition-v13";
+  } else if(wasDone && !isDone){
+    delete task.doneAt;
+    delete task.doneDate;
+    delete task.doneBy;
+    delete task.doneTimestampSource;
+    delete task.completedAt;
+    delete task.completionTimestamp;
+    delete task.markedDoneAt;
+    task.reopenedAt=new Date().toISOString();
+  }
+};
+
+syncSubStageActualDate = function(project, stage, sub){
+  if(!project) return false;
+  ensureStageDates(project);
+  const tasks=getStageTasks(project,stage,sub);
+  const rec=getStageDateRecord(project,stage,sub);
+  const allDone=tasks.length>0 && tasks.every(t=>cleanStatus(t.status)==="done");
+  const source=String(rec.actualDateSource||"");
+  const isManual=source==="manual-historical-v13";
+  let changed=false;
+
+  rec.actualDateReviewRequired=false;
+
+  if(!allDone){
+    if(rec.actualDate && !isManual){
+      rec.actualDate="";
+      rec.actualDateSource="";
+      rec.actualDateUpdatedAt=new Date().toISOString();
+      changed=true;
+    }
+    return changed;
+  }
+
+  // A deliberate manual historical correction is never overwritten by automation.
+  if(isManual && normalizeDateForInput(rec.actualDate)) return changed;
+
+  const moments=tasks.map(reliableTaskCompletionMomentV13).filter(Boolean).sort((a,b)=>a-b);
+  if(moments.length===tasks.length){
+    const automaticDate=dateInputFromTimestamp(moments[moments.length-1]);
+    if(normalizeDateForInput(rec.actualDate)!==automaticDate || rec.actualDateSource!=="automatic-last-task-done-v13"){
+      rec.actualDate=automaticDate;
+      rec.actualDateSource="automatic-last-task-done-v13";
+      rec.actualDateUpdatedAt=new Date().toISOString();
+      rec.actualDateUpdatedBy="System";
+      changed=true;
+    }
+  } else {
+    // Historical Done records with no trustworthy timestamp must be reviewed manually.
+    if(source.startsWith("automatic") && rec.actualDate){
+      rec.actualDate="";
+      rec.actualDateSource="";
+      changed=true;
+    }
+    rec.actualDateReviewRequired=true;
+  }
+  return changed;
+};
+
+function setHistoricalActualDateV13(projectId,key,value){
+  if(!requirePermission(canEditProject(),"Only Admin/PM can correct historical Actual Dates.")) return;
+  const project=(db.projects||[]).find(p=>p.id===projectId); if(!project) return;
+  ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return;
+  const tasks=getStageTasks(project,rec.stage,rec.sub);
+  if(!tasks.length || !tasks.every(t=>cleanStatus(t.status)==="done")){
+    alert("The Actual Date can be entered only after every task in this Sub-stage is Done.");
+    renderProject();
+    return;
+  }
+  const cleanValue=normalizeDateForInput(value);
+  if(!cleanValue){ alert("Please select a valid Actual Date."); renderProject(); return; }
+  const old=normalizeDateForInput(rec.actualDate)||"";
+  rec.actualDate=cleanValue;
+  rec.actualDateSource="manual-historical-v13";
+  rec.actualDateReviewRequired=false;
+  rec.actualDateUpdatedAt=new Date().toISOString();
+  rec.actualDateUpdatedBy=currentUser || currentUserEmail || "Unknown User";
+  addGlobalActivity(project,{id:"",task:`${rec.stage} / ${rec.sub}`},"Historical Actual Date Corrected",`Actual Date changed from "${formatDateDisplay(old)||"-"}" to "${formatDateDisplay(cleanValue)}" by ${rec.actualDateUpdatedBy}`);
+  persistDatabase();
+}
+
+function resetActualDateToAutoV13(projectId,key){
+  if(!requirePermission(canEditProject(),"Only Admin/PM can reset Actual Dates.")) return;
+  const project=(db.projects||[]).find(p=>p.id===projectId); if(!project) return;
+  ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return;
+  rec.actualDate="";
+  rec.actualDateSource="";
+  rec.actualDateReviewRequired=false;
+  syncSubStageActualDate(project,rec.stage,rec.sub);
+  addGlobalActivity(project,{id:"",task:`${rec.stage} / ${rec.sub}`},"Actual Date Reset",rec.actualDate ? `Reset to automatic date ${formatDateDisplay(rec.actualDate)}` : "Automatic date unavailable; manual historical date is required");
+  persistDatabase();
+}
+
+updateStageDate = function(projectId,key,field,value){
+  if(field==="actualDate") return setHistoricalActualDateV13(projectId,key,value);
+  if(!requirePermission(canEditProject(),"Only Admin/PM can update stage dates.")) return;
+  const project=(db.projects||[]).find(x=>x.id===projectId); if(!project) return;
+  ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return;
+  const cleanValue=normalizeDateForInput(value);
+  const oldValue=rec[field]||"";
+  if(oldValue===cleanValue) return;
+  rec[field]=cleanValue;
+  addGlobalActivity(project,{id:"",task:`${rec.stage} / ${rec.sub}`},"Stage Date Updated",`Planned date changed from "${formatDateDisplay(oldValue)||"-"}" to "${formatDateDisplay(cleanValue)||"-"}`);
+  persistDatabase();
+};
+
+function clearSubStageActualOnReopenV13(project,stage,sub){
+  ensureStageDates(project);
+  const rec=getStageDateRecord(project,stage,sub);
+  if(!rec.actualDate) return true;
+  const manual=rec.actualDateSource==="manual-historical-v13";
+  const message=manual
+    ? `This Sub-stage has a manually corrected Actual Date (${formatDateDisplay(rec.actualDate)}). Reopening the task will clear it. Continue?`
+    : `Reopening this task will clear the automatic Sub-stage Actual Date (${formatDateDisplay(rec.actualDate)}). Continue?`;
+  if(!confirm(message)) return false;
+  rec.actualDate="";
+  rec.actualDateSource="";
+  rec.actualDateReviewRequired=false;
+  rec.actualDateUpdatedAt=new Date().toISOString();
+  return true;
+}
+
+const updateTaskFieldBeforeV13=updateTaskField;
+updateTaskField = function(projectId,taskId,field,value){
+  const project=(db.projects||[]).find(x=>x.id===projectId);
+  const task=(project?.tasks||[]).find(x=>x.id===taskId);
+  if(project && task && field==="status" && cleanStatus(task.status)==="done" && cleanStatus(value)!=="done"){
+    if(!clearSubStageActualOnReopenV13(project,task.stage,task.sub)){ renderProject(); return; }
+  }
+  return updateTaskFieldBeforeV13(projectId,taskId,field,value);
+};
+
+saveTask = function(id){
+  const project=(db.projects||[]).find(x=>x.id===currentProjectId); if(!project) return;
+  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toISOString()};
+  if(id){
+    const task=(project.tasks||[]).find(t=>t.id===id); if(!task) return;
+    const oldStage=task.stage,oldSub=task.sub,oldStatus=task.status;
+    if(cleanStatus(oldStatus)==="done" && cleanStatus(data.status)!=="done"){
+      if(!clearSubStageActualOnReopenV13(project,oldStage,oldSub)) return;
+    }
+    stampTaskDoneTransition(task,oldStatus,data.status);
+    const changes=[];
+    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
+      if((task[k]||"")!==(data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
+    });
+    Object.assign(task,data);
+    if(changes.length){
+      const detailText=changes.join("; ");
+      addHistory(task,"Updated",detailText);
+      addGlobalActivity(project,task,"Task Updated",detailText);
+    }
+    syncSubStageActualDate(project,oldStage,oldSub);
+    syncSubStageActualDate(project,task.stage,task.sub);
+  } else {
+    const task={id:uid(),...data,history:[]};
+    stampTaskDoneTransition(task,"To Do",task.status);
+    addHistory(task,"Created","Task manually added");
+    project.tasks.push(task);
+    addGlobalActivity(project,task,"Task Created","Task manually added");
+    syncSubStageActualDate(project,task.stage,task.sub);
+  }
+  closeModal();
+  persistDatabase();
+};
+
+renderStageDateTable = function(project){
+  const table=document.getElementById("stageDateTable"); if(!table) return;
+  ensureStageDates(project);
+  // Read-only calculation only; this function never saves or writes to Firebase.
+  syncAllSubStageActualDates(project);
+  const groups=getProjectStageGroups(project);
+  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Date Mode</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>`;
+  groups.forEach(group=>{
+    const rec=getStageDateRecord(project,group.stage,group.sub);
+    const tasks=getStageTasks(project,group.stage,group.sub);
+    const pending=tasks.filter(t=>cleanStatus(t.status)!=="done").length;
+    const completed=tasks.length && pending===0;
+    const status=completed?"Completed":(tasks.some(t=>cleanStatus(t.status)==="in progress")?"In Progress":"Pending");
+    const source=String(rec.actualDateSource||"");
+    const manual=source==="manual-historical-v13";
+    const auto=source==="automatic-last-task-done-v13";
+    const review=completed && (!rec.actualDate || rec.actualDateReviewRequired);
+    let actualCell="";
+    let mode="—";
+    if(completed && (manual || review)){
+      actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" onchange="setHistoricalActualDateV13('${project.id}','${escAttr(group.key)}',this.value)" title="Admin/PM may correct the historical completion date">${manual?`<button type="button" onclick="resetActualDateToAutoV13('${project.id}','${escAttr(group.key)}')" title="Recalculate from task Done timestamps">Reset Auto</button>`:""}</div>`;
+      mode=manual?"Manual":"Manual date required";
+    } else {
+      actualCell=`<input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" readonly title="Automatically calculated from the last task marked Done">`;
+      mode=auto?"Auto":(completed?"Awaiting date":"Not completed");
+    }
+    html+=`<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
+      <td>${actualCell}</td>
+      <td><span class="pill">${esc(mode)}</span></td>
+      <td>${esc(status)}</td>
+      <td>${pending}</td>
+    </tr>`;
+  });
+  table.innerHTML=html;
+};
+
+/* ===== END FINAL MANUAL + AUTOMATIC ACTUAL DATE ENGINE V13 ===== */
+
 /* ===== END CLEAN SUB-STAGE DATE ENGINE ===== */
 
 initAuthState();
