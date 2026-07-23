@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Project Tracking Dashboard</title>
+  <title>Project Tracking Dashboard V15</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -340,7 +340,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker | Firebase shared database enabled</div>
+<div class="footer">Project Tracker V15 | Fast local-first loading + Firebase shared database</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -349,10 +349,6 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </div>
 </div>
 
-
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
 <script>
 const STATUS = ["To Do","In Progress","Done"];
@@ -377,14 +373,83 @@ const firebaseConfig = {
 
 let firebaseReady = false;
 let firebaseDBRef = null;
+let firebaseInitializationError = null;
+let firebaseSdkPromise = null;
+const FIREBASE_SDK_VERSION = "10.12.2";
+const FIREBASE_STARTUP_TIMEOUT_MS = 5000;
 
-try {
-  firebase.initializeApp(firebaseConfig);
-  firebaseDBRef = firebase.database().ref("projectTrackerDB");
-  firebaseReady = true;
-} catch (error) {
-  console.error("Firebase initialization failed. Falling back to LocalStorage.", error);
-  firebaseReady = false;
+function setLoginStatus(message, isError=false){
+  const box=document.getElementById("loginError");
+  if(!box) return;
+  box.textContent=message || "";
+  box.style.color=isError ? "#dc2626" : "#6b7280";
+}
+
+function loadExternalScript(url, timeoutMs=FIREBASE_STARTUP_TIMEOUT_MS){
+  return new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(script=>script.src===url);
+    if(existing && existing.dataset.loaded==="true"){ resolve(); return; }
+    const script=existing || document.createElement("script");
+    let settled=false;
+    const finish=(error)=>{
+      if(settled) return;
+      settled=true;
+      clearTimeout(timer);
+      if(error){ if(!existing) script.remove(); reject(error); }
+      else { script.dataset.loaded="true"; resolve(); }
+    };
+    const timer=setTimeout(()=>finish(new Error(`Timed out loading ${url}`)),timeoutMs);
+    script.async=true;
+    script.src=url;
+    script.onload=()=>finish();
+    script.onerror=()=>finish(new Error(`Failed to load ${url}`));
+    if(!existing) document.head.appendChild(script);
+  });
+}
+
+async function loadScriptWithFallbacks(paths, label){
+  let lastError=null;
+  for(const url of paths){
+    try{ await loadExternalScript(url); return; }
+    catch(error){ lastError=error; console.warn(`${label} source failed`,url,error); }
+  }
+  throw lastError || new Error(`${label} could not be loaded`);
+}
+
+function firebaseSdkUrls(file){
+  return [
+    `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/${file}`,
+    `https://cdn.jsdelivr.net/npm/firebase@${FIREBASE_SDK_VERSION}/${file}`
+  ];
+}
+
+async function initializeFirebaseServices(){
+  if(firebaseReady && firebaseDBRef) return true;
+  if(firebaseSdkPromise) return firebaseSdkPromise;
+  firebaseSdkPromise=(async()=>{
+    setLoginStatus("Loading secure login services…");
+    if(!window.firebase || !window.firebase.initializeApp){
+      await loadScriptWithFallbacks(firebaseSdkUrls("firebase-app-compat.js"),"Firebase App");
+    }
+    await Promise.all([
+      (!window.firebase?.auth ? loadScriptWithFallbacks(firebaseSdkUrls("firebase-auth-compat.js"),"Firebase Authentication") : Promise.resolve()),
+      (!window.firebase?.database ? loadScriptWithFallbacks(firebaseSdkUrls("firebase-database-compat.js"),"Firebase Database") : Promise.resolve())
+    ]);
+    if(!window.firebase?.apps?.length) firebase.initializeApp(firebaseConfig);
+    firebaseDBRef=firebase.database().ref("projectTrackerDB");
+    firebaseReady=true;
+    firebaseInitializationError=null;
+    setLoginStatus("");
+    return true;
+  })().catch(error=>{
+    firebaseReady=false;
+    firebaseDBRef=null;
+    firebaseInitializationError=error;
+    console.error("Firebase startup failed",error);
+    setLoginStatus("Secure login could not connect. Check internet access and refresh the page.",true);
+    throw error;
+  });
+  return firebaseSdkPromise;
 }
 
 
@@ -1071,70 +1136,88 @@ function showAppScreen(){
   if(app){ app.classList.remove("hidden"); app.style.display = "block"; }
 }
 
+function readLocalDatabase(){
+  const localCopy=localStorage.getItem("projectTrackerDB");
+  if(localCopy){
+    try{ db=JSON.parse(localCopy); }
+    catch(error){ console.warn("Browser backup was invalid",error); db={projects:[],users:{},activity:[],meta:{revision:0}}; }
+  }
+  if(!db || typeof db!=="object") db={projects:[],users:{},activity:[],meta:{revision:0}};
+  if(!Array.isArray(db.projects)) db.projects=[];
+  if(!Array.isArray(db.activity)) db.activity=[];
+  if(!db.meta || typeof db.meta!=="object") db.meta={revision:0};
+  ensureUsers();
+  normalizeAllDates();
+  applyMinorTaskUpdates();
+  lastKnownRemoteRevision=Number(db.meta.revision||0);
+  saveLocalBackup();
+}
+
+function applyRemoteDatabase(remoteData){
+  db=remoteData && typeof remoteData==="object" ? remoteData : {projects:[],users:{},activity:[],meta:{revision:0}};
+  if(!Array.isArray(db.projects)) db.projects=[];
+  if(!Array.isArray(db.activity)) db.activity=[];
+  if(!db.meta || typeof db.meta!=="object") db.meta={revision:0};
+  ensureUsers();
+  normalizeAllDates();
+  applyMinorTaskUpdates();
+  lastKnownRemoteRevision=Number(db.meta.revision||0);
+  saveLocalBackup();
+}
+
 function load(){
   if(dbListenerStarted) return;
 
-  const localCopy = localStorage.getItem("projectTrackerDB");
-  if(localCopy){
-    try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [], users: {} }; }
+  // Fast path: show the browser backup immediately. Firebase continues in the background.
+  readLocalDatabase();
+  const localRoleReady=applyCurrentUserRoleFromDB();
+  if(localRoleReady) renderAll();
+  const mode=document.getElementById("storageMode");
+  if(mode) mode.textContent="Browser backup loaded — connecting to Firebase…";
+
+  if(!(firebaseReady && firebaseDBRef)){
+    if(mode) mode.textContent="Browser backup mode — Firebase unavailable";
+    return;
   }
 
-  if(firebaseReady && firebaseDBRef){
-    dbListenerStarted = true;
-    firebaseDBRef.on("value", snapshot => {
-      const remoteData = snapshot.val();
+  dbListenerStarted=true;
+  let firstRemoteResponse=false;
+  const connectionTimer=setTimeout(()=>{
+    if(firstRemoteResponse) return;
+    if(mode) mode.textContent="Browser backup active — Firebase is still connecting";
+  },8000);
 
-      if(remoteData === null) {
-        if(!db || typeof db !== "object") db = { projects: [], users: {} };
-        if(!Array.isArray(db.projects)) db.projects = [];
-        if(!Array.isArray(db.activity)) db.activity = [];
-        if(!db.meta || typeof db.meta !== 'object') db.meta = { revision: 0 };
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
+  firebaseDBRef.on("value", snapshot=>{
+    firstRemoteResponse=true;
+    clearTimeout(connectionTimer);
+    const remoteData=snapshot.val();
 
-        if(firebase.auth().currentUser){
-          firebaseDBRef.set(db).catch(error => console.error("Initial database seed failed", error));
-        }
-
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database - initialized with Authentication";
-        if(applyCurrentUserRoleFromDB()){
-          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
-        }
-      } else {
-        db = remoteData || {};
-        lastKnownRemoteRevision = Number(db?.meta?.revision || 0);
-        if(!Array.isArray(db.projects)) db.projects = [];
-        if(!Array.isArray(db.activity)) db.activity = [];
-        if(!db.meta || typeof db.meta !== 'object') db.meta = { revision: 0 };
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
-
-        // Persist default user roles once, without storing any passwords.
-        if(changed && !dbSeedingUsers && firebase.auth().currentUser){
-          dbSeedingUsers = true;
-          firebaseDBRef.child("users").set(db.users).finally(()=>{ dbSeedingUsers = false; });
-        }
-
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication";
-        if(applyCurrentUserRoleFromDB()){
-          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
-        }
+    if(remoteData===null){
+      // Do not block startup. Seed an empty Firebase database from the local backup in the background.
+      if(mode) mode.textContent="Firebase connected — initializing shared database";
+      if(firebase.auth().currentUser){
+        void persistDatabase({render:false,silent:true}).then(result=>{
+          if(mode) mode.textContent=result.ok ? "Firebase Shared Database + Authentication" : "Browser backup active — Firebase initialization failed";
+        });
       }
-    }, error => {
-      console.error("Firebase load failed.", error);
-      const mode = document.getElementById("storageMode");
-      if(mode) mode.textContent = "Firebase load failed";
-      alert("Could not load Firebase data. Please check Realtime Database Rules and make sure you are logged in. Error: " + error.message);
-    });
-  } else {
-    ensureUsers();
-    applyCurrentUserRoleFromDB();
-    renderAll();
-  }
+      if(applyCurrentUserRoleFromDB()) renderAll();
+      return;
+    }
+
+    const incomingRevision=Number(remoteData?.meta?.revision||0);
+    // Ignore the echo of the exact database revision already rendered after our own save.
+    if(saveInProgress && incomingRevision===lastKnownRemoteRevision) return;
+
+    applyRemoteDatabase(remoteData);
+    if(mode) mode.textContent="Firebase Shared Database + Firebase Authentication";
+    if(applyCurrentUserRoleFromDB()) renderAll();
+  },error=>{
+    clearTimeout(connectionTimer);
+    console.error("Firebase load failed",error);
+    if(mode) mode.textContent="Browser backup active — Firebase connection failed";
+    setLoginStatus("Firebase connection failed. Browser backup remains available.",true);
+    if(applyCurrentUserRoleFromDB()) renderAll();
+  });
 }
 
 function login(){
@@ -1186,7 +1269,12 @@ function initAuthState(){
   });
 }
 
-function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
+function renderAll(){
+  updateUserProfileBox();
+  renderDashboard();
+  if(currentProjectId) renderProject();
+  if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS();
+}
 function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
 function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
 function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
@@ -2042,7 +2130,7 @@ function exportMISCSV(){
 }
 /* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
 
-/* ===== CONSOLIDATED PROJECT TRACKER ENGINE V14 =====
+/* ===== CONSOLIDATED PROJECT TRACKER ENGINE V15 =====
    Design guarantees:
    - One implementation for each critical save/task/date/render function.
    - Rendering never mutates data and never writes to Firebase.
@@ -2081,21 +2169,32 @@ function dateInputFromTimestamp(value){
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
+function cleanStatus(value){ return String(value || '').trim().toLowerCase(); }
 function isDoneStatus(value){ return cleanStatus(value)==='done'; }
-function isManualActualDate(rec){ return String(rec?.actualDateSource||'')==='manual-historical-v14'; }
+function isManualActualDate(rec){
+  return ['manual-historical-v14','manual-historical-v15'].includes(String(rec?.actualDateSource||''));
+}
 
 function reliableTaskCompletionMoment(task){
   if(!task || !isDoneStatus(task.status)) return null;
   const moments=[];
-  const explicitFields=[task.doneAt,task.completedAt,task.completionTimestamp,task.markedDoneAt];
-  explicitFields.forEach(value=>{ const date=parseTaskTimestamp(value); if(date) moments.push(date); });
+
+  // A direct timestamp is trusted only when it was created by a real status transition.
+  const source=String(task.doneTimestampSource||'').toLowerCase();
+  if(/^status-transition-v(?:14|15)$/.test(source)){
+    const direct=parseTaskTimestamp(task.doneAt);
+    if(direct) moments.push(direct);
+  }
+
+  // Historical records are trusted only when the task history explicitly records completion.
   (task.history||[]).forEach(entry=>{
     const text=`${entry?.action||''} ${entry?.details||''}`.toLowerCase();
-    const recordsDone=/(status.*(?:to|→).*done|marked.*done|completed)/.test(text);
+    const recordsDone=(/status/.test(text) && /(?:to|→|changed.*to).*done/.test(text)) || /marked\s+(?:as\s+)?done/.test(text) || /task\s+completed/.test(text);
     if(!recordsDone) return;
     const date=parseTaskTimestamp(entry?.at||entry?.timestamp||entry?.date||entry?.updatedAt);
     if(date) moments.push(date);
   });
+
   return moments.length ? moments.sort((a,b)=>a-b).at(-1) : null;
 }
 
@@ -2106,7 +2205,7 @@ function stampTaskDoneTransition(task,oldStatus,newStatus){
     task.doneAt=now.toISOString();
     task.doneDate=dateInputFromTimestamp(now);
     task.doneBy=currentUser||currentUserEmail||'Unknown User';
-    task.doneTimestampSource='status-transition-v14';
+    task.doneTimestampSource='status-transition-v15';
     delete task.reopenedAt;
   }else if(wasDone && !isDone){
     ['doneAt','doneDate','doneBy','doneTimestampSource','completedAt','completionTimestamp','markedDoneAt'].forEach(key=>delete task[key]);
@@ -2137,7 +2236,7 @@ function synchronizeSubStageActualDate(project,stage,sub){
     rec.actualDateReviewRequired=false;
   }else if(state.allReliable){
     rec.actualDate=state.automaticDate;
-    rec.actualDateSource='automatic-last-task-done-v14';
+    rec.actualDateSource='automatic-last-task-done-v15';
     rec.actualDateReviewRequired=false;
     rec.actualDateUpdatedBy='System';
   }else{
@@ -2159,9 +2258,8 @@ function synchronizeAllProjectDates(project){
 
 function prepareDatabaseForSave(){
   ensureUsers();
-  normalizeAllDates();
+  applyMinorTaskUpdates();
   if(!db.meta || typeof db.meta!=='object') db.meta={};
-  (db.projects||[]).forEach(synchronizeAllProjectDates);
   db.meta.updatedAt=new Date().toISOString();
   db.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
 }
@@ -2173,6 +2271,10 @@ function saveLocalBackup(){
 
 function performRevisionCheckedFirebaseSave(snapshotPayload,expectedRevision){
   return new Promise(resolve=>{
+    let settled=false;
+    const finish=result=>{ if(settled) return; settled=true; clearTimeout(timer); resolve(result); };
+    const timer=setTimeout(()=>finish({ok:false,timeout:true,error:new Error('Firebase save timed out')}),12000);
+
     firebaseDBRef.transaction(current=>{
       const currentRevision=Number(current?.meta?.revision||0);
       if(current!==null && currentRevision!==expectedRevision) return;
@@ -2182,13 +2284,14 @@ function performRevisionCheckedFirebaseSave(snapshotPayload,expectedRevision){
       next.meta.updatedAt=new Date().toISOString();
       return next;
     },(error,committed,snapshot)=>{
-      if(error){ console.error('Firebase transaction failed',error); resolve({ok:false,error}); return; }
-      if(!committed){ resolve({ok:false,conflict:true}); return; }
+      if(settled) return;
+      if(error){ console.error('Firebase transaction failed',error); finish({ok:false,error}); return; }
+      if(!committed){ finish({ok:false,conflict:true}); return; }
       const saved=snapshot.val()||snapshotPayload;
       lastKnownRemoteRevision=Number(saved?.meta?.revision||expectedRevision+1);
       db=saved;
       saveLocalBackup();
-      resolve({ok:true});
+      finish({ok:true});
     },false);
   });
 }
@@ -2198,7 +2301,9 @@ function persistDatabase(options={}){
   prepareDatabaseForSave();
   saveLocalBackup();
   const payload=JSON.parse(JSON.stringify(db));
-  const expectedRevision=lastKnownRemoteRevision;
+
+  // Update the interface immediately; network saving happens in the serialized queue.
+  if(render) renderAll();
 
   databaseSaveQueue=databaseSaveQueue.then(async()=>{
     saveInProgress=true;
@@ -2208,16 +2313,24 @@ function persistDatabase(options={}){
         if(!silent) alert('Please login first. Firebase Authentication is required to save data.');
         return {ok:false,error:new Error('Not authenticated')};
       }
+
+      // Capture the revision only when this queued save begins. This prevents false conflicts
+      // when several edits are made quickly on the same device.
+      const expectedRevision=lastKnownRemoteRevision;
       const result=await performRevisionCheckedFirebaseSave(payload,expectedRevision);
       if(result.conflict){
-        if(!silent) alert('This record changed on another device. Your save was not applied to prevent overwriting newer data. The latest Firebase data will be reloaded; please repeat your change.');
+        try{ localStorage.setItem('projectTrackerPendingConflict',JSON.stringify(payload)); }catch(error){}
+        if(!silent) alert('Another user saved newer data first. Your browser backup was preserved, but this Firebase save was stopped to prevent overwriting their work. Refresh, review the latest data and repeat the change.');
+        return result;
+      }
+      if(result.timeout){
+        if(!silent) alert('Firebase is responding slowly. Your change is saved in this browser and the tracker remains usable.');
         return result;
       }
       if(!result.ok && !silent) alert('Could not save to Firebase. Your browser backup was retained. Please check Firebase Rules and internet connection.');
       return result;
     }finally{
       saveInProgress=false;
-      if(render) renderAll();
     }
   }).catch(error=>{
     console.error('Unexpected save queue error',error);
@@ -2309,7 +2422,7 @@ function setHistoricalActualDate(projectId,key,value){
   if(cleanValue>today()){ alert('Actual Date cannot be in the future.'); renderProject(); return; }
   const old=normalizeDateForInput(rec.actualDate)||'';
   rec.actualDate=cleanValue;
-  rec.actualDateSource='manual-historical-v14';
+  rec.actualDateSource='manual-historical-v15';
   rec.actualDateReviewRequired=false;
   rec.actualDateUpdatedAt=new Date().toISOString();
   rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
@@ -2351,7 +2464,7 @@ function renderStageDateTable(project){
     const rec=getStageDateRecord(project,group.stage,group.sub);
     const state=deriveSubStageDateState(project,group.stage,group.sub);
     const manual=isManualActualDate(rec);
-    const auto=String(rec.actualDateSource||'')==='automatic-last-task-done-v14';
+    const auto=['automatic-last-task-done-v14','automatic-last-task-done-v15'].includes(String(rec.actualDateSource||''));
     const status=state.allDone?'Completed':(state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
     const needsManual=state.allDone&&!state.allReliable&&!manual;
     let actualCell,mode;
@@ -2373,9 +2486,21 @@ function runRetrospectiveSubStageSyncOnce(){
   return Promise.resolve(false);
 }
 
-/* ===== END CONSOLIDATED PROJECT TRACKER ENGINE V14 ===== */
+/* ===== END CONSOLIDATED PROJECT TRACKER ENGINE V15 ===== */
 
-initAuthState();
+async function bootstrapProjectTracker(){
+  showLoginScreen();
+  setLoginStatus("Loading secure login services…");
+  try{
+    await initializeFirebaseServices();
+    initAuthState();
+  }catch(error){
+    // The login screen remains responsive and explains the connection problem.
+    console.error("Project Tracker bootstrap failed",error);
+  }
+}
+
+bootstrapProjectTracker();
 </script>
 </body>
 </html>
