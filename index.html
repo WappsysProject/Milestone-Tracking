@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Project Tracking Dashboard</title>
+  <title>Project Tracking Dashboard V17</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -107,6 +107,14 @@
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
+
+    /* V17 performance safeguards */
+    #taskTable tbody, #mobileTaskCards{contain:layout style paint}
+    #taskTable tr, .mobile-task-card{content-visibility:auto;contain-intrinsic-size:48px}
+    .task-pagination{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:10px}
+    .task-pagination select{width:auto;min-width:82px}
+    .task-pagination .muted{min-width:180px;text-align:center}
+    .saving-indicator{font-weight:700}
   </style>
 </head>
 <body>
@@ -185,7 +193,7 @@
         <div class="card">
           <h3 style="margin-top:0">My Tasks</h3>
           <div class="row" style="margin-bottom:10px">
-            <input id="myTaskOwner" placeholder="Type owner name/email" oninput="renderDashboard()" />
+            <input id="myTaskOwner" placeholder="Type owner name/email" oninput="scheduleDashboardFilterRender()" />
           </div>
           <div id="myTasksDashboard"></div>
         </div>
@@ -195,7 +203,7 @@
         <div class="toolbar">
           <h2 style="margin:0">Projects</h2>
           <div class="row">
-            <input id="searchProject" style="width:260px" placeholder="Search project/client/job code..." oninput="renderDashboard()"/>
+            <input id="searchProject" style="width:260px" placeholder="Search project/client/job code..." oninput="scheduleDashboardFilterRender()"/>
             <button class="primary" onclick="openProjectForm()">+ Add Project</button>
             <button class="blue" onclick="exportAllCSV()">Export All CSV</button>
           </div>
@@ -252,12 +260,19 @@
         <div class="toolbar">
           <h3 style="margin:0">Detailed Task Tracker</h3>
           <div class="row">
-            <select id="filterDept" onchange="renderProject()"><option value="">All Departments</option></select>
-            <select id="filterStatus" onchange="renderProject()"><option value="">All Status</option><option>To Do</option><option>In Progress</option><option>Done</option></select>
-            <input id="filterText" placeholder="Search task/stage/owner..." oninput="renderProject()" style="width:240px"/>
+            <select id="filterDept" onchange="resetTaskPaginationAndRender()"><option value="">All Departments</option></select>
+            <select id="filterStatus" onchange="resetTaskPaginationAndRender()"><option value="">All Status</option><option>To Do</option><option>In Progress</option><option>Done</option></select>
+            <input id="filterText" placeholder="Search task/stage/owner..." oninput="scheduleProjectFilterRender()" style="width:240px"/>
             <button onclick="autoAssignCurrentProject()">Auto Assign Owners</button>
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
+        </div>
+        <div class="task-pagination">
+          <span class="muted" id="taskPageInfo">0 tasks</span>
+          <label style="margin:0">Rows</label>
+          <select id="taskPageSize" onchange="changeTaskPageSize(this.value)"><option>15</option><option selected>25</option><option>50</option><option>100</option></select>
+          <button type="button" id="taskPrevButton" onclick="changeTaskPage(-1)">Previous</button>
+          <button type="button" id="taskNextButton" onclick="changeTaskPage(1)">Next</button>
         </div>
         <div class="table-scroll" style="overflow:auto;max-height:72vh;margin-top:12px">
           <table id="taskTable"></table>
@@ -296,8 +311,8 @@
         <div class="toolbar">
           <h3 style="margin:0">All Projects MIS Data</h3>
           <div class="row">
-            <input id="misSearch" style="width:260px" placeholder="Search project/task/owner..." oninput="renderMIS()" />
-            <select id="misDeptFilter" onchange="renderMIS()">
+            <input id="misSearch" style="width:260px" placeholder="Search project/task/owner..." oninput="scheduleMISFilterRender()" />
+            <select id="misDeptFilter" onchange="scheduleMISFilterRender(0)">
               <option value="">All Departments</option>
               <option>Contracts & Commercial</option>
               <option>Technical Team</option>
@@ -306,7 +321,7 @@
               <option>Transition Team</option>
               <option>Billing</option>
             </select>
-            <select id="misStatusFilter" onchange="renderMIS()">
+            <select id="misStatusFilter" onchange="scheduleMISFilterRender(0)">
               <option value="">All Status</option>
               <option>To Do</option>
               <option>In Progress</option>
@@ -332,7 +347,7 @@ Do not paste PASTE_HERE values anywhere.
 Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button> <button onclick="runRetrospectiveSubStageSyncOnce({notify:true})">Reconcile Actual Dates</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -340,7 +355,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker | Firebase shared database enabled</div>
+<div class="footer">Project Tracker V17 | Faster targeted saves + automatic retrospective Sub-stage Actual Dates</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -349,10 +364,6 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </div>
 </div>
 
-
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
 <script>
 const STATUS = ["To Do","In Progress","Done"];
@@ -363,6 +374,127 @@ let currentUser = "Unknown User";
 let currentUserEmail = "";
 let currentUserRole = "Viewer";
 let currentUserRecord = null;
+
+
+/* V17 runtime-only performance state. None of this is written to Firebase. */
+let projectRuntimeCache = new WeakMap();
+let stageDatePrepared = new WeakSet();
+let workflowGroupBlueprint = null;
+let taskPage = 1;
+let taskPageSize = 25;
+let taskPageCount = 1;
+let activeRenderFrame = 0;
+let dashboardFilterTimer = 0;
+let projectFilterTimer = 0;
+let misFilterTimer = 0;
+let localBackupTimer = 0;
+let localBackupIdleHandle = 0;
+let remoteSaveTimer = 0;
+let remoteSaveInFlight = false;
+let remoteSavePending = false;
+let remoteSaveWaiters = [];
+let remoteSaveSilent = true;
+let remoteSaveImmediate = false;
+let remoteSaveForceFull = false;
+let remoteSnapshotSeen = false;
+let lastSyncedDatabase = null;
+let deferredRemoteSnapshot = null;
+let retrospectiveSyncScheduled = false;
+
+function resetRuntimeCaches(){
+  projectRuntimeCache = new WeakMap();
+  stageDatePrepared = new WeakSet();
+}
+function invalidateProjectCache(project, structureChanged=false){
+  if(!project) return;
+  projectRuntimeCache.delete(project);
+  if(structureChanged) stageDatePrepared.delete(project);
+}
+function getWorkflowGroupBlueprint(){
+  if(workflowGroupBlueprint) return workflowGroupBlueprint;
+  const map=new Map();
+  WORKFLOW_TEMPLATE.forEach((item,index)=>{
+    const stage=item.stage||'Stage Not Updated';
+    const sub=item.sub||'Sub-stage Not Updated';
+    const key=stageDateKey(stage,sub);
+    if(!map.has(key)) map.set(key,{key,stage,sub,order:index});
+  });
+  workflowGroupBlueprint=[...map.values()];
+  return workflowGroupBlueprint;
+}
+function buildProjectGroupIndex(project){
+  const groups=new Map();
+  getWorkflowGroupBlueprint().forEach(group=>groups.set(group.key,{...group}));
+  const tasksByGroup=new Map();
+  (project?.tasks||[]).forEach((task,index)=>{
+    const stage=task.stage||'Stage Not Updated';
+    const sub=task.sub||'Sub-stage Not Updated';
+    const key=stageDateKey(stage,sub);
+    if(!tasksByGroup.has(key)) tasksByGroup.set(key,[]);
+    tasksByGroup.get(key).push(task);
+    if(!groups.has(key)) groups.set(key,{key,stage,sub,order:WORKFLOW_TEMPLATE.length+index});
+  });
+  return {groups:[...groups.values()].sort((a,b)=>a.order-b.order),tasksByGroup};
+}
+function getProjectRuntime(project){
+  if(!project) return {groups:[],tasksByGroup:new Map(),dateStates:new Map()};
+  const cached=projectRuntimeCache.get(project);
+  if(cached) return cached;
+  ensureStageDates(project);
+  const prepared=projectRuntimeCache.get(project);
+  if(prepared) return prepared;
+  const index=buildProjectGroupIndex(project);
+  const runtime={...index,dateStates:new Map(),stats:null,currentStage:null,nextTask:null};
+  projectRuntimeCache.set(project,runtime);
+  return runtime;
+}
+function getActiveViewName(){
+  if(!document.getElementById('projectView')?.classList.contains('hidden')) return 'project';
+  if(!document.getElementById('misView')?.classList.contains('hidden')) return 'mis';
+  if(!document.getElementById('setupView')?.classList.contains('hidden')) return 'setup';
+  return 'dashboard';
+}
+function scheduleActiveRender(view=getActiveViewName()){
+  if(activeRenderFrame) cancelAnimationFrame(activeRenderFrame);
+  activeRenderFrame=requestAnimationFrame(()=>{
+    activeRenderFrame=0;
+    updateUserProfileBox();
+    if(view==='project') renderProject();
+    else if(view==='mis'){ renderMIS(); renderMISDashboard(); }
+    else if(view==='dashboard') renderDashboard();
+  });
+}
+function scheduleDashboardFilterRender(delay=140){
+  clearTimeout(dashboardFilterTimer);
+  dashboardFilterTimer=setTimeout(()=>renderDashboard(),delay);
+}
+function scheduleProjectFilterRender(delay=140){
+  clearTimeout(projectFilterTimer);
+  projectFilterTimer=setTimeout(()=>{ taskPage=1; renderProject(); },delay);
+}
+function scheduleMISFilterRender(delay=140){
+  clearTimeout(misFilterTimer);
+  misFilterTimer=setTimeout(()=>renderMIS(),delay);
+}
+function resetTaskPaginationAndRender(){ taskPage=1; scheduleActiveRender('project'); }
+function changeTaskPage(delta){ taskPage=Math.min(Math.max(1,taskPage+Number(delta||0)),taskPageCount); scheduleActiveRender('project'); }
+function changeTaskPageSize(value){
+  const parsed=Number(value);
+  taskPageSize=[15,25,50,100].includes(parsed)?parsed:25;
+  taskPage=1;
+  scheduleActiveRender('project');
+}
+function scheduleLocalBackup(immediate=false){
+  clearTimeout(localBackupTimer);
+  if(localBackupIdleHandle && window.cancelIdleCallback) cancelIdleCallback(localBackupIdleHandle);
+  const write=()=>{ localBackupIdleHandle=0; saveLocalBackup(); };
+  if(immediate){ write(); return; }
+  localBackupTimer=setTimeout(()=>{
+    if(window.requestIdleCallback) localBackupIdleHandle=requestIdleCallback(write,{timeout:800});
+    else write();
+  },120);
+}
+window.addEventListener('beforeunload',()=>{ try{ localStorage.setItem('projectTrackerDB',JSON.stringify(db)); }catch(error){} });
 
 const firebaseConfig = {
   apiKey: "AIzaSyAYPimuLfhtkn-go0Bl8QjwxIHVxpj87OY",
@@ -377,14 +509,83 @@ const firebaseConfig = {
 
 let firebaseReady = false;
 let firebaseDBRef = null;
+let firebaseInitializationError = null;
+let firebaseSdkPromise = null;
+const FIREBASE_SDK_VERSION = "10.12.2";
+const FIREBASE_STARTUP_TIMEOUT_MS = 5000;
 
-try {
-  firebase.initializeApp(firebaseConfig);
-  firebaseDBRef = firebase.database().ref("projectTrackerDB");
-  firebaseReady = true;
-} catch (error) {
-  console.error("Firebase initialization failed. Falling back to LocalStorage.", error);
-  firebaseReady = false;
+function setLoginStatus(message, isError=false){
+  const box=document.getElementById("loginError");
+  if(!box) return;
+  box.textContent=message || "";
+  box.style.color=isError ? "#dc2626" : "#6b7280";
+}
+
+function loadExternalScript(url, timeoutMs=FIREBASE_STARTUP_TIMEOUT_MS){
+  return new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(script=>script.src===url);
+    if(existing && existing.dataset.loaded==="true"){ resolve(); return; }
+    const script=existing || document.createElement("script");
+    let settled=false;
+    const finish=(error)=>{
+      if(settled) return;
+      settled=true;
+      clearTimeout(timer);
+      if(error){ if(!existing) script.remove(); reject(error); }
+      else { script.dataset.loaded="true"; resolve(); }
+    };
+    const timer=setTimeout(()=>finish(new Error(`Timed out loading ${url}`)),timeoutMs);
+    script.async=true;
+    script.src=url;
+    script.onload=()=>finish();
+    script.onerror=()=>finish(new Error(`Failed to load ${url}`));
+    if(!existing) document.head.appendChild(script);
+  });
+}
+
+async function loadScriptWithFallbacks(paths, label){
+  let lastError=null;
+  for(const url of paths){
+    try{ await loadExternalScript(url); return; }
+    catch(error){ lastError=error; console.warn(`${label} source failed`,url,error); }
+  }
+  throw lastError || new Error(`${label} could not be loaded`);
+}
+
+function firebaseSdkUrls(file){
+  return [
+    `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/${file}`,
+    `https://cdn.jsdelivr.net/npm/firebase@${FIREBASE_SDK_VERSION}/${file}`
+  ];
+}
+
+async function initializeFirebaseServices(){
+  if(firebaseReady && firebaseDBRef) return true;
+  if(firebaseSdkPromise) return firebaseSdkPromise;
+  firebaseSdkPromise=(async()=>{
+    setLoginStatus("Loading secure login services…");
+    if(!window.firebase || !window.firebase.initializeApp){
+      await loadScriptWithFallbacks(firebaseSdkUrls("firebase-app-compat.js"),"Firebase App");
+    }
+    await Promise.all([
+      (!window.firebase?.auth ? loadScriptWithFallbacks(firebaseSdkUrls("firebase-auth-compat.js"),"Firebase Authentication") : Promise.resolve()),
+      (!window.firebase?.database ? loadScriptWithFallbacks(firebaseSdkUrls("firebase-database-compat.js"),"Firebase Database") : Promise.resolve())
+    ]);
+    if(!window.firebase?.apps?.length) firebase.initializeApp(firebaseConfig);
+    firebaseDBRef=firebase.database().ref("projectTrackerDB");
+    firebaseReady=true;
+    firebaseInitializationError=null;
+    setLoginStatus("");
+    return true;
+  })().catch(error=>{
+    firebaseReady=false;
+    firebaseDBRef=null;
+    firebaseInitializationError=error;
+    console.error("Firebase startup failed",error);
+    setLoginStatus("Secure login could not connect. Check internet access and refresh the page.",true);
+    throw error;
+  });
+  return firebaseSdkPromise;
 }
 
 
@@ -667,7 +868,7 @@ const WORKFLOW_TEMPLATE = [
 ];
 
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
-function today(){ return new Date().toISOString().slice(0,10); }
+function today(){ return dateInputFromTimestamp(new Date()); }
 
 function parseDateFlexible(dateStr){
   if(!dateStr) return null;
@@ -712,14 +913,17 @@ function normalizeDateFields(obj){
 }
 
 function normalizeAllDates(){
-  (db.projects||[]).forEach(p=>{
-    normalizeDateFields(p);
-    ensureStageDates(p);
-    (p.tasks||[]).forEach(t=>{
-      normalizeDateFields(t);
-      clearTaskLevelDateFields(t);
-    });
+  const before=JSON.stringify(db);
+  resetRuntimeCaches();
+  (db.projects||[]).forEach(project=>{
+    normalizeDateFields(project);
+    (project.tasks||[]).forEach(task=>normalizeDateFields(task));
+    ensureStageDates(project);
+    (project.tasks||[]).forEach(task=>backfillTaskCompletionTimestamp(project,task));
+    invalidateProjectCache(project);
+    synchronizeAllProjectDates(project);
   });
+  return before!==JSON.stringify(db);
 }
 
 function canonicalTaskText(value){
@@ -744,95 +948,72 @@ function clearTaskLevelDateFields(task){
   delete task.actualDate;
 }
 function getProjectStageGroups(project){
-  const groups = new Map();
-  const addGroup = (stage, sub, order) => {
-    const safeStage = stage || "Stage Not Updated";
-    const safeSub = sub || "Sub-stage Not Updated";
-    const key = stageDateKey(safeStage, safeSub);
-    if(!groups.has(key)) groups.set(key, { key, stage:safeStage, sub:safeSub, order });
-  };
-  WORKFLOW_TEMPLATE.forEach((item, index) => addGroup(item.stage, item.sub, index));
-  (project?.tasks || []).forEach((task, index) => addGroup(task.stage, task.sub, WORKFLOW_TEMPLATE.length + index));
-  return [...groups.values()].sort((a,b)=>a.order-b.order);
+  return getProjectRuntime(project).groups;
 }
-function getStageTasks(project, stage, sub){
-  const stageKey = canonicalTaskText(stage);
-  const subKey = canonicalTaskText(sub);
-  return (project?.tasks || []).filter(task => canonicalTaskText(task.stage)===stageKey && canonicalTaskText(task.sub)===subKey);
+function getStageTasks(project,stage,sub){
+  return getProjectRuntime(project).tasksByGroup.get(stageDateKey(stage,sub)) || [];
 }
 function ensureStageDates(project){
   if(!project) return {};
-  if(!project.stageDates || typeof project.stageDates !== "object" || Array.isArray(project.stageDates)) project.stageDates = {};
-  const groups = getProjectStageGroups(project);
+  if(stageDatePrepared.has(project) && project.stageDates && typeof project.stageDates==='object' && !Array.isArray(project.stageDates)) return project.stageDates;
+  if(!project.stageDates || typeof project.stageDates!=='object' || Array.isArray(project.stageDates)) project.stageDates={};
 
-  groups.forEach(group => {
-    const key = group.key;
-    if(!project.stageDates[key] || typeof project.stageDates[key] !== "object") {
-      project.stageDates[key] = { stage: group.stage, sub: group.sub, initialPlanningDate: "", actualDate: "" };
-    }
-    const rec = project.stageDates[key];
-    rec.stage = group.stage;
-    rec.sub = group.sub;
-    rec.initialPlanningDate = normalizeDateForInput(rec.initialPlanningDate) || "";
-    rec.actualDate = normalizeDateForInput(rec.actualDate) || "";
-
-    // One-time migration: if old task-level dates exist, copy them to the stage date record.
-    const relatedTasks = getStageTasks(project, group.stage, group.sub);
+  const index=buildProjectGroupIndex(project);
+  index.groups.forEach(group=>{
+    const key=group.key;
+    if(!project.stageDates[key] || typeof project.stageDates[key]!=='object') project.stageDates[key]={stage:group.stage,sub:group.sub,initialPlanningDate:'',actualDate:''};
+    const rec=project.stageDates[key];
+    rec.stage=group.stage;
+    rec.sub=group.sub;
+    rec.initialPlanningDate=normalizeDateForInput(rec.initialPlanningDate)||'';
+    rec.actualDate=normalizeDateForInput(rec.actualDate)||'';
+    const related=index.tasksByGroup.get(key)||[];
     if(!rec.initialPlanningDate){
-      const plannedDates = relatedTasks
-        .map(t => normalizeDateForInput(t.initialPlanningDate || t.dueDate))
-        .filter(Boolean)
-        .sort();
-      if(plannedDates.length) rec.initialPlanningDate = plannedDates[0];
+      const dates=related.map(task=>normalizeDateForInput(task.initialPlanningDate||task.dueDate)).filter(Boolean).sort();
+      if(dates.length) rec.initialPlanningDate=dates[0];
     }
     if(!rec.actualDate){
-      const actualDates = relatedTasks
-        .map(t => normalizeDateForInput(t.actualDate))
-        .filter(Boolean)
-        .sort();
-      if(actualDates.length) rec.actualDate = actualDates[actualDates.length - 1];
+      const dates=related.map(task=>normalizeDateForInput(task.actualDate)).filter(Boolean).sort();
+      if(dates.length) rec.actualDate=dates.at(-1);
     }
   });
-
-  // Remove any old task-level dates so the tracker has only stage dates going forward.
-  (project.tasks || []).forEach(clearTaskLevelDateFields);
+  stageDatePrepared.add(project);
+  projectRuntimeCache.set(project,{...index,dateStates:new Map(),stats:null,currentStage:null,nextTask:null});
   return project.stageDates;
 }
-function getStageDateRecord(project, stage, sub){
+function getStageDateRecord(project,stage,sub){
   ensureStageDates(project);
-  const key = stageDateKey(stage, sub);
-  return project.stageDates[key] || { stage, sub, initialPlanningDate:"", actualDate:"" };
+  const key=stageDateKey(stage,sub);
+  return project.stageDates[key] || {stage,sub,initialPlanningDate:'',actualDate:''};
 }
-function isStageComplete(project, group){
-  const tasks = getStageTasks(project, group.stage, group.sub);
-  return tasks.length > 0 && tasks.every(task => task.status === "Done");
+function isStageComplete(project,group){
+  return deriveSubStageDateState(project,group.stage,group.sub).allDone;
 }
-function isStageOverdue(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  return rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) < 0;
+function isStageOverdue(project,group){
+  const rec=getStageDateRecord(project,group.stage,group.sub);
+  return !!rec.initialPlanningDate && !deriveSubStageDateState(project,group.stage,group.sub).allDone && daysFromToday(rec.initialPlanningDate)<0;
 }
-function isStageDueToday(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  return rec.initialPlanningDate && !isStageComplete(project, group) && daysFromToday(rec.initialPlanningDate) === 0;
+function isStageDueToday(project,group){
+  const rec=getStageDateRecord(project,group.stage,group.sub);
+  return !!rec.initialPlanningDate && !deriveSubStageDateState(project,group.stage,group.sub).allDone && daysFromToday(rec.initialPlanningDate)===0;
 }
-function isStageDueThisWeek(project, group){
-  const rec = getStageDateRecord(project, group.stage, group.sub);
-  const d = daysFromToday(rec.initialPlanningDate);
-  return rec.initialPlanningDate && !isStageComplete(project, group) && d >= 0 && d <= 7;
+function isStageDueThisWeek(project,group){
+  const rec=getStageDateRecord(project,group.stage,group.sub);
+  if(!rec.initialPlanningDate || deriveSubStageDateState(project,group.stage,group.sub).allDone) return false;
+  const days=daysFromToday(rec.initialPlanningDate);
+  return days>=0 && days<=7;
 }
-function stageDateForTask(project, task, field="initialPlanningDate"){
-  const rec = getStageDateRecord(project, task.stage, task.sub);
-  return rec[field] || "";
+function stageDateForTask(project,task,field='initialPlanningDate'){
+  return getStageDateRecord(project,task.stage,task.sub)[field] || '';
 }
 function nextPendingStage(project){
-  const groups = getProjectStageGroups(project).filter(group => !isStageComplete(project, group));
-  if(!groups.length) return null;
-  return groups.sort((a,b)=>{
-    const da = getStageDateRecord(project, a.stage, a.sub).initialPlanningDate || "9999-12-31";
-    const db = getStageDateRecord(project, b.stage, b.sub).initialPlanningDate || "9999-12-31";
-    if(da !== db) return da.localeCompare(db);
-    return a.order - b.order;
-  })[0];
+  const groups=getProjectRuntime(project).groups.filter(group=>getStageTasks(project,group.stage,group.sub).length && !deriveSubStageDateState(project,group.stage,group.sub).allDone);
+  let best=null;
+  groups.forEach(group=>{
+    const date=getStageDateRecord(project,group.stage,group.sub).initialPlanningDate||'9999-12-31';
+    if(!best || date<best.date || (date===best.date && group.order<best.group.order)) best={group,date};
+  });
+  return best?.group||null;
 }
 function getEarliestStageDate(project, field="initialPlanningDate"){
   ensureStageDates(project);
@@ -844,39 +1025,8 @@ function getLatestStageDate(project, field="actualDate"){
   const dates = Object.values(project.stageDates || {}).map(r=>normalizeDateForInput(r[field])).filter(Boolean).sort();
   return dates.length ? dates[dates.length - 1] : "";
 }
-function updateStageDate(projectId, key, field, value){
-  if(!requirePermission(canEditProject(), "Only Admin/PM can update stage dates.")) return;
-  const project = db.projects.find(x=>x.id===projectId); if(!project) return;
-  ensureStageDates(project);
-  const rec = project.stageDates[key]; if(!rec) return;
-  const cleanValue = normalizeDateForInput(value);
-  const oldValue = rec[field] || "";
-  if(oldValue === cleanValue) return;
-  rec[field] = cleanValue;
-  addGlobalActivity(project, {id:"", task:`${rec.stage} / ${rec.sub}`}, "Stage Date Updated", `${field === "actualDate" ? "Actual" : "Planned"} date changed from "${formatDateDisplay(oldValue)||"-"}" to "${formatDateDisplay(cleanValue)||"-"}"`);
-  save();
-}
-function renderStageDateTable(project){
-  const table = document.getElementById("stageDateTable"); if(!table) return;
-  ensureStageDates(project);
-  const groups = getProjectStageGroups(project);
-  let html = `<tr><th>Stage</th><th>Sub-stage</th><th>Stage Planned Date</th><th>Stage Actual Date</th><th>Stage Status</th><th>Pending Tasks</th></tr>`;
-  groups.forEach(group => {
-    const rec = getStageDateRecord(project, group.stage, group.sub);
-    const tasks = getStageTasks(project, group.stage, group.sub);
-    const pending = tasks.filter(t=>t.status!=="Done").length;
-    const status = isStageComplete(project, group) ? "Completed" : (tasks.some(t=>t.status==="In Progress") ? "In Progress" : "Pending");
-    html += `<tr>
-      <td>${esc(group.stage)}</td>
-      <td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','actualDate',this.value)"></td>
-      <td>${esc(status)}</td>
-      <td>${pending}</td>
-    </tr>`;
-  });
-  table.innerHTML = html;
-}
+
+
 
 const TECHNICAL_TASK_ASSIGNMENTS = {
   "handover from sales and contracts to projects": "Process Team",
@@ -1001,26 +1151,18 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
 
 function syncWorkflowTemplateToExistingProjects(){
   if(!Array.isArray(db.projects)) return 0;
-  let added = 0;
-  db.projects.forEach(project => {
-    if(!Array.isArray(project.tasks)) project.tasks = [];
-    const existingKeys = new Set(project.tasks.map(templateTaskKey));
-    WORKFLOW_TEMPLATE.forEach(template => {
-      const key = templateTaskKey(template);
-      if(existingKeys.has(key)) return;
-      const task = createWorkflowTaskFromTemplate(template, project, "Task added from updated workflow template");
-      project.tasks.push(task);
-      existingKeys.add(key);
-      added++;
+  let added=0;
+  db.projects.forEach(project=>{
+    if(!Array.isArray(project.tasks)) project.tasks=[];
+    const existing=new Set(project.tasks.map(templateTaskKey));
+    let projectAdded=0;
+    WORKFLOW_TEMPLATE.forEach(template=>{
+      const key=templateTaskKey(template); if(existing.has(key)) return;
+      project.tasks.push(createWorkflowTaskFromTemplate(template,project,'Task added from updated workflow template'));
+      existing.add(key); added++; projectAdded++;
     });
+    if(projectAdded){ invalidateProjectCache(project,true); ensureStageDates(project); }
   });
-  if(added > 0){
-    try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
-    if(firebaseReady && firebaseDBRef && !workflowSyncRunning){
-      workflowSyncRunning = true;
-      firebaseDBRef.set(db).finally(() => { workflowSyncRunning = false; });
-    }
-  }
   return added;
 }
 
@@ -1059,31 +1201,7 @@ function showDuplicateTaskReport(){
 let dbListenerStarted = false;
 let dbSeedingUsers = false;
 
-function save(){
-  ensureUsers();
-  normalizeAllDates();
 
-  if(firebaseReady && firebaseDBRef){
-    if(!firebase.auth().currentUser){
-      alert("Please login first. Firebase Authentication is required to save data.");
-      return;
-    }
-    firebaseDBRef.set(db)
-      .then(()=> {
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
-        renderAll();
-      })
-      .catch(error => {
-        console.error("Firebase save failed.", error);
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-        alert("Could not save to Firebase. Please check Firebase Rules, internet connection, and login status.");
-        renderAll();
-      });
-  } else {
-    localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-    renderAll();
-  }
-}
 
 function applyCurrentUserRoleFromDB(){
   ensureUsers();
@@ -1126,67 +1244,71 @@ function showAppScreen(){
   if(app){ app.classList.remove("hidden"); app.style.display = "block"; }
 }
 
+function deepCloneData(value){
+  return typeof structuredClone==='function'?structuredClone(value):JSON.parse(JSON.stringify(value));
+}
+
+function readLocalDatabase(){
+  const localCopy=localStorage.getItem('projectTrackerDB');
+  if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
+  if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
+  if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
+  ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates(); lastKnownRemoteRevision=Number(db.meta.revision||0); lastSyncedDatabase=null; scheduleLocalBackup(true);
+}
+
+function applyRemoteDatabase(remoteData){
+  const remoteBaseline=deepCloneData(remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}});
+  db=deepCloneData(remoteBaseline);
+  if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
+  resetRuntimeCaches(); ensureUsers(); const migrated=normalizeAllDates(); applyMinorTaskUpdates(); lastKnownRemoteRevision=Number(db.meta.revision||0); lastSyncedDatabase=remoteBaseline; scheduleLocalBackup();
+  return migrated || JSON.stringify(remoteBaseline)!==JSON.stringify(db);
+}
+
+function applyDeferredRemoteSnapshot(){
+  if(!deferredRemoteSnapshot || remoteSaveInFlight || remoteSavePending) return false;
+  const pending=deferredRemoteSnapshot; deferredRemoteSnapshot=null;
+  const incomingRevision=Number(pending?.meta?.revision||0);
+  if(incomingRevision<=lastKnownRemoteRevision) return false;
+  const migrated=applyRemoteDatabase(pending);
+  if(applyCurrentUserRoleFromDB()) scheduleActiveRender();
+  if(migrated&&canEditProject()) void persistDatabase({silent:true,immediate:true});
+  return true;
+}
+
 function load(){
   if(dbListenerStarted) return;
-
-  const localCopy = localStorage.getItem("projectTrackerDB");
-  if(localCopy){
-    try { db = JSON.parse(localCopy); } catch(e) { db = { projects: [], users: {} }; }
-  }
-
-  if(firebaseReady && firebaseDBRef){
-    dbListenerStarted = true;
-    firebaseDBRef.on("value", snapshot => {
-      const remoteData = snapshot.val();
-
-      if(remoteData === null) {
-        if(!db || typeof db !== "object") db = { projects: [], users: {} };
-        if(!Array.isArray(db.projects)) db.projects = [];
-        if(!Array.isArray(db.activity)) db.activity = [];
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db));
-
-        if(firebase.auth().currentUser){
-          firebaseDBRef.set(db).catch(error => console.error("Initial database seed failed", error));
-        }
-
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database - initialized with Authentication";
-        if(applyCurrentUserRoleFromDB()){
-          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
-        }
-      } else {
-        db = remoteData || {};
-        if(!Array.isArray(db.projects)) db.projects = [];
-        if(!Array.isArray(db.activity)) db.activity = [];
-        const changed = ensureUsers();
-        normalizeAllDates();
-        localStorage.setItem("projectTrackerDB", JSON.stringify(db)); // backup copy
-
-        // Persist default user roles once, without storing any passwords.
-        if(changed && !dbSeedingUsers && firebase.auth().currentUser){
-          dbSeedingUsers = true;
-          firebaseDBRef.child("users").set(db.users).finally(()=>{ dbSeedingUsers = false; });
-        }
-
-        const mode = document.getElementById("storageMode");
-        if(mode) mode.textContent = "Firebase Shared Database + Firebase Authentication";
-        if(applyCurrentUserRoleFromDB()){
-          runRetrospectiveSubStageSyncOnce().finally(()=>renderAll());
-        }
-      }
-    }, error => {
-      console.error("Firebase load failed.", error);
-      const mode = document.getElementById("storageMode");
-      if(mode) mode.textContent = "Firebase load failed";
-      alert("Could not load Firebase data. Please check Realtime Database Rules and make sure you are logged in. Error: " + error.message);
-    });
-  } else {
-    ensureUsers();
-    applyCurrentUserRoleFromDB();
-    renderAll();
-  }
+  readLocalDatabase();
+  if(applyCurrentUserRoleFromDB()) renderAll();
+  const mode=document.getElementById('storageMode');
+  if(mode) mode.textContent='Browser backup loaded — connecting to Firebase…';
+  if(!(firebaseReady&&firebaseDBRef)){ if(mode) mode.textContent='Browser backup mode — Firebase unavailable'; return; }
+  dbListenerStarted=true; remoteSnapshotSeen=false;
+  const timer=setTimeout(()=>{ if(!remoteSnapshotSeen&&mode) mode.textContent='Browser backup active — Firebase is still connecting'; },6000);
+  firebaseDBRef.on('value',snapshot=>{
+    clearTimeout(timer); const remoteData=snapshot.val();
+    if(remoteData===null){
+      remoteSnapshotSeen=true;
+      if(mode) mode.textContent='Firebase connected — initializing shared database';
+      if(firebase.auth().currentUser) void persistDatabase({silent:true,immediate:true,forceFull:true}).then(result=>{ if(mode) mode.textContent=result.ok?'Firebase Shared Database + Authentication':'Browser backup active — Firebase initialization failed'; });
+      return;
+    }
+    const incomingRevision=Number(remoteData?.meta?.revision||0);
+    if(remoteSnapshotSeen && incomingRevision<=lastKnownRemoteRevision) return;
+    remoteSnapshotSeen=true;
+    if(remoteSaveInFlight||remoteSavePending){
+      deferredRemoteSnapshot=remoteData;
+      if(mode) mode.textContent='Local edits pending — newer remote data queued safely';
+      return;
+    }
+    const migrated=applyRemoteDatabase(remoteData);
+    if(mode) mode.textContent='Firebase Shared Database + Firebase Authentication';
+    if(applyCurrentUserRoleFromDB()) scheduleActiveRender();
+    if(migrated&&canEditProject()) void persistDatabase({silent:true,immediate:true});
+  },error=>{
+    clearTimeout(timer); console.error('Firebase load failed',error);
+    if(mode) mode.textContent='Browser backup active — Firebase connection failed';
+    setLoginStatus('Firebase connection failed. Browser backup remains available.',true);
+  });
 }
 
 function login(){
@@ -1238,12 +1360,16 @@ function initAuthState(){
   });
 }
 
-function renderAll(){ ensureUsers(); applyMinorTaskUpdates(); updateUserProfileBox(); renderDashboard(); if(currentProjectId) renderProject(); if(!document.getElementById("misView")?.classList.contains("hidden")) renderMIS(); }
-function showDashboard(){ setTab("dashboardTab"); hideAll(); document.getElementById("dashboardView").classList.remove("hidden"); renderDashboard(); }
-function showProjectView(){ setTab("projectTab"); hideAll(); document.getElementById("projectView").classList.remove("hidden"); renderProject(); }
-function showMIS(){ setTab("misTab"); hideAll(); document.getElementById("misView").classList.remove("hidden"); renderMIS(); 
-  renderMISDashboard();
+function renderAll(){
+  updateUserProfileBox();
+  const view=getActiveViewName();
+  if(view==='project') renderProject();
+  else if(view==='mis'){ renderMIS(); renderMISDashboard(); }
+  else if(view==='dashboard') renderDashboard();
 }
+function showDashboard(){ setTab('dashboardTab'); hideAll(); document.getElementById('dashboardView').classList.remove('hidden'); renderDashboard(); }
+function showProjectView(){ setTab('projectTab'); hideAll(); document.getElementById('projectView').classList.remove('hidden'); renderProject(); }
+function showMIS(){ setTab('misTab'); hideAll(); document.getElementById('misView').classList.remove('hidden'); renderMIS(); renderMISDashboard(); }
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
 function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
@@ -1258,125 +1384,80 @@ function isDueTodayTask(t){ return false; }
 function isDueThisWeekTask(t){ return false; }
 function isCriticalTask(t){ return String(t.critical || "").toLowerCase() === "yes" || String(t.priority || "").toLowerCase() === "critical"; }
 
-function stats(p){
-  ensureStageDates(p);
-  const total=p.tasks.length;
-  const done=p.tasks.filter(t=>t.status==="Done").length;
-  const progress=p.tasks.filter(t=>t.status==="In Progress").length;
-  const todo=p.tasks.filter(t=>t.status==="To Do").length;
-  const stageGroups=getProjectStageGroups(p);
-  const overdue=stageGroups.filter(g=>isStageOverdue(p,g)).length;
-  const dueToday=stageGroups.filter(g=>isStageDueToday(p,g)).length;
-  const dueWeek=stageGroups.filter(g=>isStageDueThisWeek(p,g)).length;
-  const criticalOverdue=0;
-  const completion= total?Math.round(done*100/total):0;
-  const health = overdue===0 ? "Green" : (overdue<=3 ? "Amber" : "Red");
-  return {total,done,progress,todo,overdue,dueToday,dueWeek,criticalOverdue,completion,health};
+function stats(project){
+  const runtime=getProjectRuntime(project);
+  if(runtime.stats) return runtime.stats;
+  const tasks=project.tasks||[];
+  let done=0,progress=0,todo=0,overdue=0,dueToday=0,dueWeek=0;
+  tasks.forEach(task=>{
+    const status=cleanStatus(task.status);
+    if(status==='done') done++;
+    else if(status==='in progress') progress++;
+    else todo++;
+  });
+  runtime.groups.forEach(group=>{
+    const state=deriveSubStageDateState(project,group.stage,group.sub);
+    if(!state.tasks.length || state.allDone) return;
+    const date=getStageDateRecord(project,group.stage,group.sub).initialPlanningDate;
+    if(!date) return;
+    const days=daysFromToday(date);
+    if(days<0) overdue++;
+    if(days===0) dueToday++;
+    if(days>=0 && days<=7) dueWeek++;
+  });
+  const total=tasks.length;
+  const completion=total?Math.round(done*100/total):0;
+  const health=overdue===0?'Green':(overdue<=3?'Amber':'Red');
+  runtime.stats={total,done,progress,todo,overdue,dueToday,dueWeek,criticalOverdue:0,completion,health};
+  return runtime.stats;
 }
 function healthBadge(health){
   const c = health==="Green" ? "green" : health==="Amber" ? "amber" : "red";
   return `<span class="health ${c}">${health}</span>`;
 }
-function nextPendingTask(p){
-  ensureStageDates(p);
-  const pending = (p.tasks || [])
-    .filter(t=>t.status!=="Done")
-    .sort((a,b)=>{
-      const da = stageDateForTask(p,a,"initialPlanningDate") || "9999-12-31";
-      const db = stageDateForTask(p,b,"initialPlanningDate") || "9999-12-31";
-      if(da !== db) return da.localeCompare(db);
-      return (p.tasks || []).indexOf(a) - (p.tasks || []).indexOf(b);
-    })[0];
-  return pending || null;
+function nextPendingTask(project){
+  const runtime=getProjectRuntime(project);
+  if(runtime.nextTask!==null) return runtime.nextTask||null;
+  let best=null;
+  (project.tasks||[]).forEach((task,index)=>{
+    if(isDoneStatus(task.status)) return;
+    const date=stageDateForTask(project,task,'initialPlanningDate')||'9999-12-31';
+    if(!best || date<best.date || (date===best.date && index<best.index)) best={task,date,index};
+  });
+  runtime.nextTask=best?.task||false;
+  return best?.task||null;
 }
-function getCurrentStage(p){
-  const tasks = Array.isArray(p.tasks) ? p.tasks : [];
-  if(!tasks.length) return "Not Started";
-  if(tasks.every(t => t.status === "Done")) return "Completed";
-
-  const workflowOrder = new Map();
-  WORKFLOW_TEMPLATE.forEach((item, index) => {
-    const key = `${item.stage}|||${item.sub}`;
-    if(!workflowOrder.has(key)) workflowOrder.set(key, index);
-  });
-
-  const groups = new Map();
-  tasks.forEach((t, index) => {
-    const stage = t.stage || "Stage Not Updated";
-    const sub = t.sub || "Sub-stage Not Updated";
-    const key = `${stage}|||${sub}`;
-    if(!groups.has(key)){
-      groups.set(key, {
-        stage,
-        sub,
-        order: workflowOrder.has(key) ? workflowOrder.get(key) : WORKFLOW_TEMPLATE.length + index,
-        tasks: []
-      });
-    }
-    groups.get(key).tasks.push(t);
-  });
-
-  const sortedGroups = [...groups.values()].sort((a,b)=>a.order-b.order);
-  const activeGroups = sortedGroups.filter(g => g.tasks.some(t => t.status === "In Progress"));
-  if(activeGroups.length){
-    const current = activeGroups[activeGroups.length - 1];
-    return `${current.stage} / ${current.sub}`;
-  }
-
-  const firstIncomplete = sortedGroups.find(g => !g.tasks.every(t => t.status === "Done"));
-  return firstIncomplete ? `${firstIncomplete.stage} / ${firstIncomplete.sub}` : "Completed";
+function getCurrentStage(project){
+  const runtime=getProjectRuntime(project);
+  if(runtime.currentStage!==null) return runtime.currentStage;
+  const taskGroups=runtime.groups.filter(group=>(runtime.tasksByGroup.get(group.key)||[]).length);
+  if(!taskGroups.length){ runtime.currentStage='Not Started'; return runtime.currentStage; }
+  if((project.tasks||[]).every(task=>isDoneStatus(task.status))){ runtime.currentStage='Completed'; return runtime.currentStage; }
+  const active=taskGroups.filter(group=>(runtime.tasksByGroup.get(group.key)||[]).some(task=>cleanStatus(task.status)==='in progress'));
+  const current=active.length?active.at(-1):taskGroups.find(group=>!(runtime.tasksByGroup.get(group.key)||[]).every(task=>isDoneStatus(task.status)));
+  runtime.currentStage=current?`${current.stage} / ${current.sub}`:'Completed';
+  return runtime.currentStage;
 }
 function renderDashboard(){
-  const q=(document.getElementById("searchProject")?.value||"").toLowerCase();
-  const myOwner=(document.getElementById("myTaskOwner")?.value||"").toLowerCase().trim();
-  const list=document.getElementById("projectsList"); if(!list) return;
-
-  const allStats = db.projects.map(p=>({p, s:stats(p)}));
-  const filtered=db.projects.filter(p=>(p.name+p.client+p.jobCode+p.location+p.manager).toLowerCase().includes(q));
-
-  const totalProjects=db.projects.length;
-  const completedProjects=allStats.filter(x=>x.s.completion===100).length;
-  const delayedProjects=allStats.filter(x=>x.s.overdue>0).length;
-  const onTrack=allStats.filter(x=>x.s.overdue===0 && x.s.completion<100).length;
-  const avg=totalProjects?Math.round(allStats.reduce((a,x)=>a+x.s.completion,0)/totalProjects):0;
-  const overdueTasks=allStats.reduce((a,x)=>a+x.s.overdue,0);
-  const dueToday=allStats.reduce((a,x)=>a+x.s.dueToday,0);
-  const dueWeek=allStats.reduce((a,x)=>a+x.s.dueWeek,0);
-
-  setText("kpiProjects",totalProjects);
-  setText("kpiOnTrack",onTrack);
-  setText("kpiDelayedProjects",delayedProjects);
-  setText("kpiCompletedProjects",completedProjects);
-  setText("kpiCompletion",avg+"%");
-  setText("kpiOverdueTasks",overdueTasks);
-  setText("kpiDueToday",dueToday);
-  setText("kpiDueWeek",dueWeek);
-
-  renderDepartmentDashboard();
-  renderAlertsDashboard();
-  renderNotificationDashboard();
-  renderActivityFeed();
-  renderMyTasksDashboard(myOwner);
-  renderCurrentStageTable(filtered);
-
-  list.innerHTML = filtered.map(p=>{
-    const s=stats(p);
-    const next=nextPendingTask(p);
-    return `<div class="card project-card" onclick="openProject('${p.id}')">
-      <div class="toolbar">
-        <h3 style="margin:0 0 8px">${esc(p.name||"Untitled Project")}</h3>
-        ${healthBadge(s.health)}
-      </div>
-      <div class="summary-line"><b>Job Code</b><span>${esc(p.jobCode||"-")}</span></div>
-      <div class="summary-line"><b>Client</b><span>${esc(p.client||"-")}</span></div>
-      <div class="summary-line"><b>Current Stage</b><span>${esc(getCurrentStage(p))}</span></div>
-      <div class="summary-line"><b>Next Task</b><span>${next ? esc(next.task) : "All tasks completed"}</span></div>
-      <div class="summary-line"><b>Stage Planned Date</b><span>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</span></div>
-      <div class="summary-line"><b>Status</b><span>${badge(p.overallStatus||"To Do")}</span></div>
-      <div class="bar"><span style="width:${s.completion}%"></span></div>
-      <p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p>
-    </div>`;
-  }).join("") || `<div class="card">No projects added yet. Click <b>Add Project</b>.</div>`;
+  const q=(document.getElementById('searchProject')?.value||'').toLowerCase();
+  const myOwner=(document.getElementById('myTaskOwner')?.value||'').toLowerCase().trim();
+  const list=document.getElementById('projectsList'); if(!list) return;
+  const summaries=(db.projects||[]).map(project=>({project,stats:stats(project),next:nextPendingTask(project),current:getCurrentStage(project)}));
+  const summaryById=new Map(summaries.map(item=>[item.project.id,item]));
+  const filtered=(db.projects||[]).filter(project=>String((project.name||'')+(project.client||'')+(project.jobCode||'')+(project.location||'')+(project.manager||'')).toLowerCase().includes(q));
+  const total=summaries.length;
+  const completed=summaries.filter(item=>item.stats.completion===100).length;
+  const delayed=summaries.filter(item=>item.stats.overdue>0).length;
+  const onTrack=summaries.filter(item=>item.stats.overdue===0&&item.stats.completion<100).length;
+  const average=total?Math.round(summaries.reduce((sum,item)=>sum+item.stats.completion,0)/total):0;
+  setText('kpiProjects',total); setText('kpiOnTrack',onTrack); setText('kpiDelayedProjects',delayed); setText('kpiCompletedProjects',completed);
+  setText('kpiCompletion',average+'%'); setText('kpiOverdueTasks',summaries.reduce((sum,item)=>sum+item.stats.overdue,0));
+  setText('kpiDueToday',summaries.reduce((sum,item)=>sum+item.stats.dueToday,0)); setText('kpiDueWeek',summaries.reduce((sum,item)=>sum+item.stats.dueWeek,0));
+  renderDepartmentDashboard(); renderAlertsDashboard(); renderNotificationDashboard(); renderActivityFeed(); renderMyTasksDashboard(myOwner); renderCurrentStageTable(filtered,summaryById);
+  list.innerHTML=filtered.map(project=>{
+    const item=summaryById.get(project.id); const s=item.stats; const next=item.next;
+    return `<div class="card project-card" onclick="openProject('${project.id}')"><div class="toolbar"><h3 style="margin:0 0 8px">${esc(project.name||'Untitled Project')}</h3>${healthBadge(s.health)}</div><div class="summary-line"><b>Job Code</b><span>${esc(project.jobCode||'-')}</span></div><div class="summary-line"><b>Client</b><span>${esc(project.client||'-')}</span></div><div class="summary-line"><b>Current Stage</b><span>${esc(item.current)}</span></div><div class="summary-line"><b>Next Task</b><span>${next?esc(next.task):'All tasks completed'}</span></div><div class="summary-line"><b>Stage Planned Date</b><span>${next?esc(formatDateDisplay(stageDateForTask(project,next,'initialPlanningDate'))||'-'):'-'}</span></div><div class="summary-line"><b>Status</b><span>${badge(s.completion===100?'Done':(s.progress>0||s.done>0?'In Progress':'To Do'))}</span></div><div class="bar"><span style="width:${s.completion}%"></span></div><p class="muted">${s.completion}% complete · ${s.overdue} overdue · ${s.total} tasks</p></div>`;
+  }).join('')||'<div class="card">No projects added yet. Click <b>Add Project</b>.</div>';
 }
 
 function setText(id,val){ const el=document.getElementById(id); if(el) el.textContent=val; }
@@ -1393,23 +1474,13 @@ function renderActivityFeed(){
   `).join("") || `<p class="muted">No activity yet.</p>`;
 }
 
-function renderCurrentStageTable(projects){
-  const el=document.getElementById("currentStageTable"); if(!el) return;
-  let rows=`<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Stage Planned Date</th></tr>`;
-  projects.forEach(p=>{
-    const s=stats(p);
-    const next=nextPendingTask(p);
-    const stageParts=getCurrentStage(p).split(" / ");
-    rows += `<tr>
-      <td><b>${esc(p.name||"Untitled Project")}</b><br><span class="muted">${esc(p.jobCode||"")}</span></td>
-      <td>${healthBadge(s.health)}</td>
-      <td>${s.completion}%</td>
-      <td>${esc(stageParts[0]||"-")}</td>
-      <td>${esc(stageParts[1]||"-")}</td>
-      <td>${next ? esc(next.task) : "All tasks completed"}</td>
-      <td>${next ? esc(next.owner||"-") : "-"}</td>
-      <td>${next ? esc(formatDateDisplay(stageDateForTask(p,next,"initialPlanningDate"))||"-") : "-"}</td>
-    </tr>`;
+function renderCurrentStageTable(projects,summaryById=new Map()){
+  const el=document.getElementById('currentStageTable'); if(!el) return;
+  let rows='<tr><th>Project</th><th>Health</th><th>Completion</th><th>Current Stage</th><th>Current Sub-stage</th><th>Next Pending Task</th><th>Owner</th><th>Stage Planned Date</th></tr>';
+  projects.forEach(project=>{
+    const item=summaryById.get(project.id)||{stats:stats(project),next:nextPendingTask(project),current:getCurrentStage(project)};
+    const parts=item.current.split(' / '); const next=item.next;
+    rows+=`<tr><td><b>${esc(project.name||'Untitled Project')}</b><br><span class="muted">${esc(project.jobCode||'')}</span></td><td>${healthBadge(item.stats.health)}</td><td>${item.stats.completion}%</td><td>${esc(parts[0]||'-')}</td><td>${esc(parts[1]||'-')}</td><td>${next?esc(next.task):'All tasks completed'}</td><td>${next?esc(next.owner||'-'):'-'}</td><td>${next?esc(formatDateDisplay(stageDateForTask(project,next,'initialPlanningDate'))||'-'):'-'}</td></tr>`;
   });
   el.innerHTML=rows;
 }
@@ -1440,78 +1511,53 @@ function renderDepartmentDashboard(){
 }
 
 function renderAlertsDashboard(){
-  const el=document.getElementById("alertDashboard"); if(!el) return;
+  const el=document.getElementById('alertDashboard'); if(!el) return;
   const alerts=[];
-  db.projects.forEach(project=>{
-    ensureStageDates(project);
-    getProjectStageGroups(project).forEach(group=>{
-      const rec = getStageDateRecord(project, group.stage, group.sub);
-      if(isStageOverdue(project, group)) alerts.push({type:"overdue", project, group, date:rec.initialPlanningDate, label:"Overdue Stage"});
-      else if(isStageDueToday(project, group)) alerts.push({type:"today", project, group, date:rec.initialPlanningDate, label:"Stage Due Today"});
-      else if(isStageDueThisWeek(project, group)) alerts.push({type:"week", project, group, date:rec.initialPlanningDate, label:"Stage Due This Week"});
+  (db.projects||[]).forEach(project=>{
+    const runtime=getProjectRuntime(project);
+    runtime.groups.forEach(group=>{
+      const state=deriveSubStageDateState(project,group.stage,group.sub); if(!state.tasks.length||state.allDone) return;
+      const date=getStageDateRecord(project,group.stage,group.sub).initialPlanningDate; if(!date) return;
+      const days=daysFromToday(date);
+      if(days<0) alerts.push({type:'overdue',project,group,date,label:'Overdue Stage'});
+      else if(days===0) alerts.push({type:'today',project,group,date,label:'Stage Due Today'});
+      else if(days<=7) alerts.push({type:'week',project,group,date,label:'Stage Due This Week'});
     });
   });
-  alerts.sort((a,b)=>(a.date||"9999-12-31").localeCompare(b.date||"9999-12-31"));
-  el.innerHTML = `<div class="alert-list">` + (alerts.slice(0,12).map(a=>`
-    <div class="alert-item ${a.type}">
-      <b>${esc(a.label)}:</b> ${esc(a.group.stage)} / ${esc(a.group.sub)}
-      <div class="muted">${esc(a.project.name||"Project")} · Planned Date: ${esc(formatDateDisplay(a.date)||"-")}</div>
-    </div>`).join("") || `<p class="muted">No overdue or upcoming stages.</p>`) + `</div>`;
+  alerts.sort((a,b)=>(a.date||'9999-12-31').localeCompare(b.date||'9999-12-31'));
+  el.innerHTML='<div class="alert-list">'+(alerts.slice(0,12).map(item=>`<div class="alert-item ${item.type}"><b>${esc(item.label)}:</b> ${esc(item.group.stage)} / ${esc(item.group.sub)}<div class="muted">${esc(item.project.name||'Project')} · Planned Date: ${esc(formatDateDisplay(item.date)||'-')}</div></div>`).join('')||'<p class="muted">No overdue or upcoming stages.</p>')+'</div>';
 }
 
 function renderNotificationDashboard(){
-  const el=document.getElementById("notificationDashboard"); if(!el) return;
+  const el=document.getElementById('notificationDashboard'); if(!el) return;
   const notifications=[];
-  db.projects.forEach(project=>{
-    ensureStageDates(project);
-    (project.tasks||[]).forEach(task=>{
-      if(task.status==="Done") return;
-      if(!task.owner) notifications.push({level:"Missing Owner", project, task});
-    });
-    getProjectStageGroups(project).forEach(group=>{
-      const rec = getStageDateRecord(project, group.stage, group.sub);
-      if(!isStageComplete(project, group) && !rec.initialPlanningDate) {
-        notifications.push({level:"Missing Stage Planned Date", project, task:{task:`${group.stage} / ${group.sub}`, dept:"Stage Date", owner:"-"}});
-      }
-      if(isStageOverdue(project, group)) {
-        notifications.push({level:"Stage Escalation Required", project, task:{task:`${group.stage} / ${group.sub}`, dept:"Stage Date", owner:"-"}});
-      }
+  (db.projects||[]).forEach(project=>{
+    (project.tasks||[]).forEach(task=>{ if(!isDoneStatus(task.status)&&!task.owner) notifications.push({level:'Missing Owner',project,task}); });
+    const runtime=getProjectRuntime(project);
+    runtime.groups.forEach(group=>{
+      const state=deriveSubStageDateState(project,group.stage,group.sub); if(!state.tasks.length||state.allDone) return;
+      const rec=getStageDateRecord(project,group.stage,group.sub);
+      if(!rec.initialPlanningDate) notifications.push({level:'Missing Stage Planned Date',project,task:{task:`${group.stage} / ${group.sub}`,dept:'Stage Date',owner:'-'}});
+      else if(daysFromToday(rec.initialPlanningDate)<0) notifications.push({level:'Stage Escalation Required',project,task:{task:`${group.stage} / ${group.sub}`,dept:'Stage Date',owner:'-'}});
     });
   });
-  el.innerHTML = notifications.slice(0,12).map(n=>`
-    <div class="alert-item ${n.level==='Stage Escalation Required'?'overdue':''}">
-      <b>${esc(n.level)}</b>: ${esc(n.task.task)}
-      <div class="muted">${esc(n.project.name||"Project")} · ${esc(n.task.dept)} · Owner: ${esc(n.task.owner||"-")}</div>
-    </div>
-  `).join("") || `<p class="muted">No system notifications.</p>`;
+  el.innerHTML=notifications.slice(0,12).map(item=>`<div class="alert-item ${item.level==='Stage Escalation Required'?'overdue':''}"><b>${esc(item.level)}</b>: ${esc(item.task.task)}<div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)} · Owner: ${esc(item.task.owner||'-')}</div></div>`).join('')||'<p class="muted">No system notifications.</p>';
 }
 
 function renderMyTasksDashboard(owner){
-  const el=document.getElementById("myTasksDashboard"); if(!el) return;
-  if(!owner){
-    el.innerHTML = `<p class="muted">Type owner name/email to see assigned tasks.</p>`;
-    return;
-  }
-  const tasks=[];
-  db.projects.forEach(p=>p.tasks.forEach(t=>{
-    if(String(t.owner||"").toLowerCase().includes(owner) && t.status!=="Done") tasks.push({project:p, task:t});
-  }));
-  tasks.sort((a,b)=>(stageDateForTask(a.project,a.task,"initialPlanningDate")||"9999-12-31").localeCompare(stageDateForTask(b.project,b.task,"initialPlanningDate")||"9999-12-31"));
-  el.innerHTML = tasks.slice(0,12).map(x=>{
-    const plannedDate = stageDateForTask(x.project,x.task,"initialPlanningDate");
-    const label = plannedDate ? (daysFromToday(plannedDate) < 0 ? "Stage Overdue" : daysFromToday(plannedDate) === 0 ? "Stage Due Today" : daysFromToday(plannedDate) <= 7 ? "Stage Due This Week" : x.task.status) : x.task.status;
-    return `<div class="mini-row">
-      <div>
-        <b>${esc(x.task.task)}</b>
-        <div class="muted">${esc(x.project.name||"Project")} · ${esc(x.task.dept)}</div>
-        <span class="pill">${esc(label)}</span>
-      </div>
-      <span>${esc(formatDateDisplay(plannedDate)||"-")}</span>
-    </div>`;
-  }).join("") || `<p class="muted">No pending tasks found for this owner.</p>`;
+  const el=document.getElementById('myTasksDashboard'); if(!el) return;
+  if(!owner){ el.innerHTML='<p class="muted">Type owner name/email to see assigned tasks.</p>'; return; }
+  const matches=[];
+  (db.projects||[]).forEach(project=>(project.tasks||[]).forEach(task=>{ if(String(task.owner||'').toLowerCase().includes(owner)&&!isDoneStatus(task.status)) matches.push({project,task,date:stageDateForTask(project,task,'initialPlanningDate')||'9999-12-31'}); }));
+  matches.sort((a,b)=>a.date.localeCompare(b.date));
+  el.innerHTML=matches.slice(0,12).map(item=>{
+    const date=item.date==='9999-12-31'?'':item.date; const days=date?daysFromToday(date):null;
+    const label=days===null?item.task.status:(days<0?'Stage Overdue':days===0?'Stage Due Today':days<=7?'Stage Due This Week':item.task.status);
+    return `<div class="mini-row"><div><b>${esc(item.task.task)}</b><div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)}</div><span class="pill">${esc(label)}</span></div><span>${esc(formatDateDisplay(date)||'-')}</span></div>`;
+  }).join('')||'<p class="muted">No pending tasks found for this owner.</p>';
 }
 
-function openProject(id){ currentProjectId=id; showProjectView(); }
+function openProject(id){ currentProjectId=id; taskPage=1; showProjectView(); }
 
 function getTechnicalDepartment(technicalTask){
   const value = String(technicalTask || "").trim();
@@ -1522,72 +1568,60 @@ function departmentLabel(t){
 }
 
 function renderProject(){
-  const p=db.projects.find(x=>x.id===currentProjectId); if(!p) { showDashboard(); return; }
-  document.getElementById("projectTitle").textContent=p.name || "Project";
-  document.getElementById("projectSummary").innerHTML = [
-    ["Project Name",p.name],["Job Code",p.jobCode],["Stage",getCurrentStage(p).split(" / ")[0]],["Sub Stage",getCurrentStage(p).split(" / ")[1]||"-"],
-    ["Project Target Date",formatDateDisplay(p.targetDate)],["Status",p.overallStatus],["RMC Budget",p.rmcBudget],["Freight Value",p.freightValue],["Site Expenses",p.siteExpenses],["Contractor Budget",p.contractorBudget],["Technology & Capacity",p.technology],["Location",p.location]
-  ].map(x=>`<div class="kpi"><div class="lbl">${x[0]}</div><div style="font-weight:800;margin-top:5px">${esc(x[1]||"-")}</div></div>`).join("");
-  renderStageDateTable(p);
-  const s=stats(p); p.overallStatus=s.completion===100?"Done":(s.progress>0||s.done>0?"In Progress":"To Do");
-  document.getElementById("pCompletion").textContent=s.completion+"%"; document.getElementById("pTodo").textContent=s.todo; document.getElementById("pProgress").textContent=s.progress; document.getElementById("pDone").textContent=s.done;
-  const filterDeptEl = document.getElementById("filterDept");
-  const selectedDept = filterDeptEl.value || "";
-  const deptOptions = [...new Set([...DEPARTMENTS, ...p.tasks.map(t=>departmentLabel(t)).filter(Boolean)])];
-  filterDeptEl.innerHTML = '<option value="">All Departments</option>' + deptOptions.map(d=>`<option value="${escAttr(d)}" ${selectedDept===d?"selected":""}>${esc(d)}</option>`).join("");
-  const fd=filterDeptEl.value, fs=document.getElementById("filterStatus").value, ft=(document.getElementById("filterText").value||"").toLowerCase();
-  let tasks=p.tasks.filter(t=>{
-    const dLabel = departmentLabel(t);
-    const searchBlob = (t.task+t.stage+t.sub+t.owner+dLabel+(t.technicalTask||"")).toLowerCase();
-    return (!fd || t.dept===fd || dLabel===fd) && (!fs || t.status===fs) && (!ft || searchBlob.includes(ft));
-  });
-  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>`;
-  let lastStage="", lastSub="";
-  tasks.forEach(t=>{
-    if(t.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="23">${esc(t.stage)}</td></tr>`; lastStage=t.stage; lastSub=""; }
-    if(t.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="23">${esc(t.sub)}</td></tr>`; lastSub=t.sub; }
-    html+=`<tr>
-      <td>${esc(t.stage)}</td><td>${esc(t.sub)}</td><td>${esc(departmentLabel(t))}</td><td>${esc(t.task)}</td>
-      <td><input class="inline-input" value="${escAttr(t.planning||"")}" onchange="updateTaskField('${p.id}','${t.id}','planning',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.visitorPerson||"")}" onchange="updateTaskField('${p.id}','${t.id}','visitorPerson',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.siteReport||"")}" onchange="updateTaskField('${p.id}','${t.id}','siteReport',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.checkPoints||"")}" onchange="updateTaskField('${p.id}','${t.id}','checkPoints',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.checkingPerson||"")}" onchange="updateTaskField('${p.id}','${t.id}','checkingPerson',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.qualityCheckReport||"")}" onchange="updateTaskField('${p.id}','${t.id}','qualityCheckReport',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.monthlyCorrespondence||"")}" onchange="updateTaskField('${p.id}','${t.id}','monthlyCorrespondence',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.budget||"")}" onchange="updateTaskField('${p.id}','${t.id}','budget',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.expensesIncurred||"")}" onchange="updateTaskField('${p.id}','${t.id}','expensesIncurred',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.plannedBilling||"")}" onchange="updateTaskField('${p.id}','${t.id}','plannedBilling',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.actualBilling||"")}" onchange="updateTaskField('${p.id}','${t.id}','actualBilling',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.collection||"")}" onchange="updateTaskField('${p.id}','${t.id}','collection',this.value)"></td>
-      <td><input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())"></td>
-      <td><select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select></td>
-      <td><textarea class="inline-input" style="min-width:180px;min-height:54px" onchange="updateTaskField('${p.id}','${t.id}','remarks',this.value)">${esc(t.remarks||"")}</textarea></td>
-      <td><textarea class="inline-input" style="min-width:180px;min-height:54px" onchange="updateTaskField('${p.id}','${t.id}','delayReason',this.value)">${esc(t.delayReason||"")}</textarea></td>
-      <td>${esc(t.lastUpdated||"")}</td>
-      <td><button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button></td>
-      <td><button class="small primary" onclick="openTaskForm('${t.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${t.id}')">Delete</button></td>
-    </tr>`;
-  });
-  document.getElementById("taskTable").innerHTML=html;
+  const project=(db.projects||[]).find(item=>item.id===currentProjectId);
+  if(!project){ showDashboard(); return; }
+  const currentStage=getCurrentStage(project);
+  const stageParts=currentStage.split(' / ');
+  const s=stats(project);
+  const summary=document.getElementById('projectSummary');
+  document.getElementById('projectTitle').textContent=project.name||'Project';
+  summary.innerHTML=[['Project Name',project.name],['Job Code',project.jobCode],['Stage',stageParts[0]],['Sub Stage',stageParts[1]||'-'],['Project Target Date',formatDateDisplay(project.targetDate)],['Status',s.completion===100?'Done':(s.progress>0||s.done>0?'In Progress':'To Do')],['RMC Budget',project.rmcBudget],['Freight Value',project.freightValue],['Site Expenses',project.siteExpenses],['Contractor Budget',project.contractorBudget],['Technology & Capacity',project.technology],['Location',project.location]].map(item=>`<div class="kpi"><div class="lbl">${item[0]}</div><div style="font-weight:800;margin-top:5px">${esc(item[1]||'-')}</div></div>`).join('');
+  renderStageDateTable(project);
+  setText('pCompletion',s.completion+'%'); setText('pTodo',s.todo); setText('pProgress',s.progress); setText('pDone',s.done);
 
-  const mobile=document.getElementById("mobileTaskCards");
-  if(mobile){
-    mobile.innerHTML = tasks.map(t=>`
-      <div class="mobile-task-card">
-        <b>${esc(t.task)}</b>
-        <div class="muted">${esc(t.stage)} → ${esc(t.sub)} · ${esc(t.dept)}</div>
-        <label>Owner</label>
-        <input class="inline-input" value="${escAttr(t.owner||"")}" onchange="updateTaskField('${p.id}','${t.id}','owner',this.value.trim())">
-        <label>Status</label>
-        <select class="inline-select" onchange="updateTaskField('${p.id}','${t.id}','status',this.value)">${STATUS.map(s=>`<option ${t.status===s?"selected":""}>${s}</option>`).join("")}</select>
-        <div class="row" style="margin-top:8px">
-          <button class="small" onclick="showTaskHistory('${t.id}')">${(t.history||[]).length} log</button>
-          <button class="small primary" onclick="openTaskForm('${t.id}')">Full Edit</button>
-        </div>
-      </div>
-    `).join("");
+  const filterDept=document.getElementById('filterDept');
+  const selectedDept=filterDept.value||'';
+  const options=[...new Set([...DEPARTMENTS,...project.tasks.map(departmentLabel).filter(Boolean)])];
+  const optionsKey=options.join('|');
+  if(filterDept.dataset.optionsKey!==optionsKey){
+    filterDept.innerHTML='<option value="">All Departments</option>'+options.map(value=>`<option value="${escAttr(value)}">${esc(value)}</option>`).join('');
+    filterDept.dataset.optionsKey=optionsKey;
+    filterDept.value=options.includes(selectedDept)?selectedDept:'';
   }
+  const fd=filterDept.value;
+  const fs=document.getElementById('filterStatus').value;
+  const ft=(document.getElementById('filterText').value||'').toLowerCase();
+  const filtered=(project.tasks||[]).filter(task=>{
+    const dept=departmentLabel(task);
+    const blob=`${task.task||''} ${task.stage||''} ${task.sub||''} ${task.owner||''} ${dept||''} ${task.technicalTask||''}`.toLowerCase();
+    return (!fd||task.dept===fd||dept===fd)&&(!fs||task.status===fs)&&(!ft||blob.includes(ft));
+  });
+  taskPageCount=Math.max(1,Math.ceil(filtered.length/taskPageSize));
+  taskPage=Math.min(Math.max(1,taskPage),taskPageCount);
+  const start=(taskPage-1)*taskPageSize;
+  const visible=filtered.slice(start,start+taskPageSize);
+  setText('taskPageInfo',`${filtered.length} task${filtered.length===1?'':'s'} · Page ${taskPage} of ${taskPageCount}`);
+  const prev=document.getElementById('taskPrevButton'),next=document.getElementById('taskNextButton'),size=document.getElementById('taskPageSize');
+  if(prev) prev.disabled=taskPage<=1; if(next) next.disabled=taskPage>=taskPageCount; if(size) size.value=String(taskPageSize);
+
+  const mobile=window.matchMedia('(max-width:760px)').matches;
+  const table=document.getElementById('taskTable'); const cards=document.getElementById('mobileTaskCards');
+  if(mobile){
+    table.innerHTML='';
+    cards.innerHTML=visible.map(task=>`<div class="mobile-task-card"><b>${esc(task.task)}</b><div class="muted">${esc(task.stage)} → ${esc(task.sub)} · ${esc(departmentLabel(task))}</div><label>Owner</label><input class="inline-input" value="${escAttr(task.owner||'')}" ${canEditProject()?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"><label>Status</label><select class="inline-select" ${canEditTask(task)?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select><div class="row" style="margin-top:8px"><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button></div></div>`).join('')||'<p class="muted">No tasks match the selected filters.</p>';
+    return;
+  }
+  cards.innerHTML='';
+  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>';
+  let lastStage='',lastSub='';
+  visible.forEach(task=>{
+    if(task.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="23">${esc(task.stage)}</td></tr>`; lastStage=task.stage; lastSub=''; }
+    if(task.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="23">${esc(task.sub)}</td></tr>`; lastSub=task.sub; }
+    const editable=canEditTask(task),ownerEditable=canEditProject();
+    const input=(field,value)=>`<input class="inline-input" value="${escAttr(value||'')}" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','${field}',this.value)">`;
+    html+=`<tr><td>${esc(task.stage)}</td><td>${esc(task.sub)}</td><td>${esc(departmentLabel(task))}</td><td>${esc(task.task)}</td><td>${input('planning',task.planning)}</td><td>${input('visitorPerson',task.visitorPerson)}</td><td>${input('siteReport',task.siteReport)}</td><td>${input('checkPoints',task.checkPoints)}</td><td>${input('checkingPerson',task.checkingPerson)}</td><td>${input('qualityCheckReport',task.qualityCheckReport)}</td><td>${input('monthlyCorrespondence',task.monthlyCorrespondence)}</td><td>${input('budget',task.budget)}</td><td>${input('expensesIncurred',task.expensesIncurred)}</td><td>${input('plannedBilling',task.plannedBilling)}</td><td>${input('actualBilling',task.actualBilling)}</td><td>${input('collection',task.collection)}</td><td><input class="inline-input" value="${escAttr(task.owner||'')}" ${ownerEditable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"></td><td><select class="inline-select" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','remarks',this.value)">${esc(task.remarks||'')}</textarea></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','delayReason',this.value)">${esc(task.delayReason||'')}</textarea></td><td>${esc(task.lastUpdated||'')}</td><td><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button></td><td><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${task.id}')">Delete</button></td></tr>`;
+  });
+  table.innerHTML=html;
 }
 function badge(st){ const c=st==="Done"?"done":st==="In Progress"?"progress":"todo"; return `<span class="status ${c}">${esc(st||"To Do")}</span>`; }
 function openProjectForm(id){
@@ -1615,14 +1649,17 @@ function defaultOwnerForDept(p, dept){
 }
 function addHistory(task, action, details){
   if(!task.history) task.history=[];
-  task.history.unshift({at:new Date().toLocaleString(), action, details, by: currentUser || "Unknown User"});
+  const now=new Date();
+  task.history.unshift({at:now.toLocaleString(),timestamp:now.toISOString(), action, details, by: currentUser || "Unknown User"});
 }
 
 function addGlobalActivity(project, task, action, details){
   if(!db.activity) db.activity=[];
+  const now=new Date();
   db.activity.unshift({
     id: uid(),
-    at: new Date().toLocaleString(),
+    at: now.toLocaleString(),
+    timestamp: now.toISOString(),
     by: currentUser || "Unknown User",
     projectId: project?.id || "",
     projectName: project?.name || "",
@@ -1634,37 +1671,15 @@ function addGlobalActivity(project, task, action, details){
   db.activity = db.activity.slice(0, 200);
 }
 
-function updateTaskField(projectId, taskId, field, value){
-  const p=db.projects.find(x=>x.id===projectId); if(!p) return;
-  const t=p.tasks.find(x=>x.id===taskId); if(!t) return;
-  if(!canEditTask(t)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
-  if(field==="owner" && !(currentUserRole==="Admin" || currentUserRole==="PM")){ alert("Only Admin/PM can change owner."); renderProject(); return; }
-  const oldValue=t[field] || "";
-  if(oldValue === value) return;
-  t[field]=value;
-  t.lastUpdated=new Date().toLocaleString();
-  const labelMap={status:"Status", owner:"Owner"};
-  const details=`${labelMap[field]||field} changed from "${oldValue}" to "${value}"`;
-  addHistory(t,"Updated",details);
-  addGlobalActivity(p,t,"Task Updated",details);
-  save();
-}
+
 function saveProject(id){
-  const data={name:v("name"),jobCode:v("jobCode"),client:v("client"),orderValue:v("orderValue"),rmcBudget:v("rmcBudget"),freightValue:v("freightValue"),siteExpenses:v("siteExpenses"),contractorBudget:v("contractorBudget"),technology:v("technology"),location:v("location"),startDate:v("startDate"),targetDate:v("targetDate"),manager:v("manager"),ownerContracts:v("ownerContracts"),ownerTechnical:v("ownerTechnical"),ownerPurchase:v("ownerPurchase"),ownerProjects:v("ownerProjects"),ownerTransition:v("ownerTransition"),ownerBilling:v("ownerBilling"),overallStatus:document.getElementById("f_overallStatus").value};
-  if(id){ 
-    const existing=db.projects.find(p=>p.id===id);
-    Object.assign(existing, data);
-    ensureStageDates(existing);
-    addGlobalActivity(existing, {id:"", task:"Project details"}, "Project Updated", "Project details updated");
-  }
-  else{
-    const newProject={id:uid(),...data,tasks:[],stageDates:{}};
-    newProject.tasks=WORKFLOW_TEMPLATE.map(t => createWorkflowTaskFromTemplate(t, newProject, "Task created from workflow template"));
-    ensureStageDates(newProject);
-    db.projects.push(newProject);
-    addGlobalActivity(newProject, {id:"", task:"Project created"}, "Project Created", "New project created with workflow template");
-  }
-  closeModal(); save();
+  const data={name:v('name'),jobCode:v('jobCode'),client:v('client'),orderValue:v('orderValue'),rmcBudget:v('rmcBudget'),freightValue:v('freightValue'),siteExpenses:v('siteExpenses'),contractorBudget:v('contractorBudget'),technology:v('technology'),location:v('location'),startDate:v('startDate'),targetDate:v('targetDate'),manager:v('manager'),ownerContracts:v('ownerContracts'),ownerTechnical:v('ownerTechnical'),ownerPurchase:v('ownerPurchase'),ownerProjects:v('ownerProjects'),ownerTransition:v('ownerTransition'),ownerBilling:v('ownerBilling'),overallStatus:document.getElementById('f_overallStatus').value};
+  let created=false;
+  if(id){ const project=db.projects.find(item=>item.id===id); Object.assign(project,data); invalidateProjectCache(project); addGlobalActivity(project,{id:'',task:'Project details'},'Project Updated','Project details updated'); }
+  else{ const project={id:uid(),...data,tasks:[],stageDates:{}}; project.tasks=WORKFLOW_TEMPLATE.map(item=>createWorkflowTaskFromTemplate(item,project,'Task created from workflow template')); ensureStageDates(project); db.projects.push(project); addGlobalActivity(project,{id:'',task:'Project created'},'Project Created','New project created with workflow template'); currentProjectId=project.id; taskPage=1; created=true; }
+  closeModal();
+  if(created) showProjectView(); else scheduleActiveRender();
+  void persistDatabase({immediate:true});
 }
 function v(id){ return document.getElementById("f_"+id).value.trim(); }
 function openTaskForm(taskId){
@@ -1695,47 +1710,12 @@ function openTaskForm(taskId){
   </div><div class="row" style="margin-top:16px"><button class="primary" onclick="saveTask('${taskId||""}')">Save Task</button><button onclick="closeModal()">Cancel</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
 }
-function saveTask(id){
-  const p=db.projects.find(x=>x.id===currentProjectId);
-  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toLocaleString()};
-  if(id){
-    const task=p.tasks.find(t=>t.id===id);
-    const changes=[];
-    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(k=>{
-      if((task[k]||"") !== (data[k]||"")) changes.push(`${k}: "${task[k]||""}" → "${data[k]||""}"`);
-    });
-    Object.assign(task, data);
-    if(changes.length){
-      const detailText=changes.join("; ");
-      addHistory(task,"Updated",detailText);
-      addGlobalActivity(p,task,"Task Updated",detailText);
-    }
-  } else {
-    const task={id:uid(),...data,history:[]};
-    addHistory(task,"Created","Task manually added");
-    p.tasks.push(task);
-    addGlobalActivity(p,task,"Task Created","Task manually added");
-  }
-  closeModal(); save();
-}
+
 function autoAssignCurrentProject(){
-  if(!requirePermission(canEditProject(), "Only Admin/PM can auto-assign owners.")) return;
-  const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
-  let count=0;
-  p.tasks.forEach(task=>{
-    const newOwner=defaultOwnerForDept(p, task.dept);
-    if(newOwner && task.owner!==newOwner){
-      const old=task.owner||"";
-      task.owner=newOwner;
-      task.lastUpdated=new Date().toLocaleString();
-      const detail=`Owner changed from "${old}" to "${newOwner}" based on department owner`;
-      addHistory(task,"Auto-assigned",detail);
-      addGlobalActivity(p,task,"Auto-assigned",detail);
-      count++;
-    }
-  });
-  save();
-  alert(count+" tasks auto-assigned/updated.");
+  if(!requirePermission(canEditProject(),'Only Admin/PM can auto-assign owners.')) return;
+  const project=db.projects.find(item=>item.id===currentProjectId); if(!project) return; let count=0;
+  project.tasks.forEach(task=>{ const owner=defaultOwnerForDept(project,task.dept); if(owner&&task.owner!==owner){ const old=task.owner||''; task.owner=owner; task.lastUpdated=new Date().toISOString(); const detail=`Owner changed from "${old}" to "${owner}" based on department owner`; addHistory(task,'Auto-assigned',detail); addGlobalActivity(project,task,'Auto-assigned',detail); count++; } });
+  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase(); alert(count+' tasks auto-assigned/updated.');
 }
 function showTaskHistory(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=p.tasks.find(x=>x.id===taskId);
@@ -1744,8 +1724,19 @@ function showTaskHistory(taskId){
   document.getElementById("modalBody").innerHTML=`<h3>${esc(t.task)}</h3><table><tr><th>Time</th><th>Updated By</th><th>Action</th><th>Details</th></tr>${rows}</table><div class="row" style="margin-top:16px"><button onclick="closeModal()">Close</button></div>`;
   document.getElementById("modal").classList.remove("hidden");
 }
-function deleteTask(id){ if(!requirePermission(canDelete(),"Only Admin can delete tasks.")) return; if(confirm("Delete this task?")){ const p=db.projects.find(x=>x.id===currentProjectId); const task=p.tasks.find(t=>t.id===id); addGlobalActivity(p,task||{id,task:"Deleted task"},"Task Deleted","Task deleted"); p.tasks=p.tasks.filter(t=>t.id!==id); save(); } }
-function deleteCurrentProject(){ if(!requirePermission(canDelete(),"Only Admin can delete projects.")) return; if(confirm("Delete current project?")){ const p=db.projects.find(x=>x.id===currentProjectId); addGlobalActivity(p,{id:"",task:"Project deleted"},"Project Deleted","Project deleted"); db.projects=db.projects.filter(p=>p.id!==currentProjectId); currentProjectId=null; save(); showDashboard(); } }
+function deleteTask(id){
+  if(!requirePermission(canDelete(),'Only Admin can delete tasks.')) return;
+  if(!confirm('Delete this task?')) return;
+  const project=db.projects.find(item=>item.id===currentProjectId); const task=project?.tasks.find(item=>item.id===id); if(!project||!task) return;
+  const stage=task.stage,sub=task.sub; addGlobalActivity(project,task,'Task Deleted','Task deleted'); project.tasks=project.tasks.filter(item=>item.id!==id);
+  invalidateProjectCache(project,true); ensureStageDates(project); synchronizeSubStageActualDate(project,stage,sub); scheduleActiveRender('project'); void persistDatabase();
+}
+function deleteCurrentProject(){
+  if(!requirePermission(canDelete(),'Only Admin can delete projects.')) return;
+  if(!confirm('Delete current project?')) return;
+  const project=db.projects.find(item=>item.id===currentProjectId); addGlobalActivity(project,{id:'',task:'Project deleted'},'Project Deleted','Project deleted');
+  db.projects=db.projects.filter(item=>item.id!==currentProjectId); currentProjectId=null; resetRuntimeCaches(); showDashboard(); void persistDatabase({immediate:true});
+}
 function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
 function esc(s){ return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])); }
 function escAttr(s){ return esc(s).replace(/"/g,"&quot;"); }
@@ -1832,16 +1823,7 @@ function renderMIS(){
   </tr>`).join("");
   table.innerHTML=html;
 }
-function exportMISCSV(){
-  const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
-  const dept=document.getElementById("misDeptFilter")?.value||"";
-  const st=document.getElementById("misStatusFilter")?.value||"";
-  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
-  if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
-  const csvRows=[["Project Name","Job Code","Client","Stage","Sub-stage","Department","Task","Owner","Task Status","Stage Planned Date","Stage Actual Date","Site Visits / M.O.M Report Status","Quality Checks Status","Correspondence","Expense","Budget","Budget Deviation","Billing Status","Collection Status","Customer Feedback"]];
-  rows.forEach(r=>csvRows.push([r.projectName,r.jobCode,r.client,r.stage,r.sub,r.department,r.task,r.owner,r.taskStatus,r.initialPlanningDate,r.actualDate,r.siteMom,r.quality,r.correspondence,r.expense,r.budget,r.budgetDeviation,r.billingStatus,r.collectionStatus,r.customerFeedback]));
-  downloadFile("all-projects-mis-summary.csv", csv(csvRows), "text/csv");
-}
+
 
 function exportProjectCSV(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
@@ -1869,9 +1851,15 @@ function testFirebaseWrite(){
   });
 }
 function downloadBackup(){ downloadFile("project-tracker-backup.json", JSON.stringify(db,null,2), "application/json"); }
-function restoreBackup(e){
-  const file=e.target.files[0]; if(!file) return;
-  const reader=new FileReader(); reader.onload=()=>{ try{ db=JSON.parse(reader.result); save(); alert("Backup restored."); }catch(err){ alert("Invalid JSON."); } }; reader.readAsText(file);
+function restoreBackup(event){
+  const file=event.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); normalizeAllDates(); ensureUsers(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
+    catch(error){ alert('Invalid JSON backup.'); }
+    finally{ event.target.value=''; }
+  };
+  reader.readAsText(file);
 }
 function downloadFile(name, content, type){
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([content],{type})); a.download=name; a.click(); URL.revokeObjectURL(a.href);
@@ -2139,310 +2127,425 @@ function exportMISCSV(){
 }
 /* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
 
-/* ===== BUG-FIXED SUB-STAGE ACTUAL DATE ENGINE ===== */
-function cleanStatus(value){
-  return String(value || "").trim().toLowerCase();
-}
+/* ===== PERFORMANCE + ACTUAL DATE ENGINE V17 =====
+   Design guarantees:
+   - Rendering does not trigger Firebase writes.
+   - Ordinary edits use targeted multi-path Firebase updates, not full-database transactions.
+   - New Done transitions store an immutable ISO completion timestamp.
+   - Existing Done tasks are reconciled from Done timestamps, task history, activity logs, or Last Updated.
+   - A missing old timestamp does not block a completed Sub-stage Actual Date when other completion evidence exists.
+   - Sub-stage Actual Date is the latest available completion date across all Done tasks in that exact Stage + Sub-stage.
+   - Manual historical dates remain protected until a task is reopened.
+*/
+
+let lastKnownRemoteRevision = Number(db?.meta?.revision || 0);
+let saveInProgress = false;
 
 function parseTaskTimestamp(value){
   if(!value) return null;
-  if(value instanceof Date) return isNaN(value.getTime()) ? null : value;
-  if(typeof value === "number"){
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  const raw = String(value).trim();
-  if(!raw) return null;
-  const direct = new Date(raw);
-  if(!isNaN(direct.getTime())) return direct;
-  const m = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
-  if(!m) return null;
-  let hour = Number(m[4] || 0);
-  const minute = Number(m[5] || 0);
-  const second = Number(m[6] || 0);
-  const ap = String(m[7] || "").toUpperCase();
-  if(ap === "PM" && hour < 12) hour += 12;
-  if(ap === "AM" && hour === 12) hour = 0;
-  const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), hour, minute, second);
-  return isNaN(d.getTime()) ? null : d;
+  if(value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const text=String(value).trim();
+  if(!text) return null;
+  const native=new Date(text);
+  if(!Number.isNaN(native.getTime())) return native;
+  const dmy=text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?/i);
+  if(!dmy) return null;
+  let hour=Number(dmy[4]||0);
+  const minute=Number(dmy[5]||0), second=Number(dmy[6]||0);
+  const ap=String(dmy[7]||'').toUpperCase();
+  if(ap==='PM' && hour<12) hour+=12;
+  if(ap==='AM' && hour===12) hour=0;
+  const date=new Date(Number(dmy[3]),Number(dmy[2])-1,Number(dmy[1]),hour,minute,second);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function dateInputFromTimestamp(value){
-  const d = parseTaskTimestamp(value);
-  if(!d) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,"0");
-  const day = String(d.getDate()).padStart(2,"0");
-  return `${y}-${m}-${day}`;
+  const date=parseTaskTimestamp(value);
+  if(!date) return '';
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
 
-function isGenuineDoneHistoryEntry(entry){
-  const action = String(entry?.action || "").trim().toLowerCase();
-  const details = String(entry?.details || "").trim().toLowerCase();
-  if(action === "completed" || action === "marked done") return true;
-  // Accept only transitions INTO Done. Do not accept “Done to In Progress”.
-  return /(?:changed|updated).*\bto\s*["']?done["']?\b/.test(details) ||
-         /\bstatus\s*[:=-]\s*done\b/.test(details);
+function cleanStatus(value){ return String(value || '').trim().toLowerCase(); }
+function isDoneStatus(value){ return cleanStatus(value)==='done'; }
+function isManualActualDate(rec){
+  return /^manual-historical-v(?:14|15|16|17)$/.test(String(rec?.actualDateSource||''));
 }
+function textRecordsDone(value){
+  const text=String(value||'').toLowerCase().replace(/\s+/g,' ');
+  return /marked\s+(?:as\s+)?done/.test(text)
+    || /task\s+(?:was\s+)?completed/.test(text)
+    || /status[^\n]*(?:changed|updated)?[^\n]*(?:to|→)\s*["']?done/.test(text)
+    || /(?:from\s+["']?(?:to do|in progress)["']?\s+(?:to|→)\s+["']?done)/.test(text)
+    || /completed\s+successfully/.test(text);
+}
+function latestMoment(items){
+  const valid=items.filter(item=>item?.moment instanceof Date&&!Number.isNaN(item.moment.getTime()));
+  return valid.length?valid.sort((a,b)=>a.moment-b.moment).at(-1):null;
+}
+function activityMatchesTask(entry,project,task){
+  if(entry?.projectId&&project?.id&&entry.projectId!==project.id) return false;
+  if(!entry?.projectId&&entry?.projectName&&project?.name&&canonicalTaskText(entry.projectName)!==canonicalTaskText(project.name)) return false;
+  if(entry?.taskId&&task?.id) return entry.taskId===task.id;
+  return canonicalTaskText(entry?.taskName)===canonicalTaskText(task?.task);
+}
+function taskCompletionEvidence(project,task){
+  if(!task || !isDoneStatus(task.status)) return {moment:null,source:'not-done',confidence:'none'};
+  const explicit=[];
+  const directFields=[
+    ['doneAt',task.doneAt],['completedAt',task.completedAt],['completionTimestamp',task.completionTimestamp],
+    ['markedDoneAt',task.markedDoneAt],['doneDate',task.doneDate]
+  ];
+  directFields.forEach(([source,value])=>{ const moment=parseTaskTimestamp(value); if(moment) explicit.push({moment,source,confidence:'verified'}); });
+  (task.history||[]).forEach(entry=>{
+    if(!textRecordsDone(`${entry?.action||''} ${entry?.details||''}`)) return;
+    const moment=parseTaskTimestamp(entry?.timestamp||entry?.at||entry?.date||entry?.updatedAt);
+    if(moment) explicit.push({moment,source:'task-history',confidence:'verified'});
+  });
+  (db.activity||[]).forEach(entry=>{
+    if(!activityMatchesTask(entry,project,task)||!textRecordsDone(`${entry?.action||''} ${entry?.details||''}`)) return;
+    const moment=parseTaskTimestamp(entry?.timestamp||entry?.at||entry?.date||entry?.updatedAt);
+    if(moment) explicit.push({moment,source:'activity-log',confidence:'verified'});
+  });
+  const bestExplicit=latestMoment(explicit);
+  if(bestExplicit) return bestExplicit;
+  const fallback=parseTaskTimestamp(task.lastUpdated);
+  if(fallback) return {moment:fallback,source:'last-updated-fallback',confidence:'fallback'};
+  return {moment:null,source:'missing',confidence:'none'};
+}
+function reliableTaskCompletionMoment(task,project=null){ return taskCompletionEvidence(project,task).moment; }
 
-function taskCompletionMoment(task){
-  if(!task || cleanStatus(task.status) !== "done") return null;
-  const moments = [];
-  [task.doneAt, task.completedAt, task.completionTimestamp].forEach(value=>{
-    const d = parseTaskTimestamp(value);
-    if(d) moments.push(d);
-  });
-  (task.history || []).forEach(entry=>{
-    if(!isGenuineDoneHistoryEntry(entry)) return;
-    const d = parseTaskTimestamp(entry?.at || entry?.timestamp || entry?.date || entry?.updatedAt);
-    if(d) moments.push(d);
-  });
-  if(!moments.length){
-    const fallback = parseTaskTimestamp(task.lastUpdated || task.updatedAt || task.modifiedAt || task.createdAt);
-    if(fallback) moments.push(fallback);
+function backfillTaskCompletionTimestamp(project,task){
+  if(!task||!isDoneStatus(task.status)) return false;
+  const existing=parseTaskTimestamp(task.doneAt);
+  if(existing){
+    let changed=false;
+    if(!task.doneDate){ task.doneDate=dateInputFromTimestamp(existing); changed=true; }
+    if(!task.doneTimestampSource){ task.doneTimestampSource='retrospective-existing-doneAt-v17'; changed=true; }
+    return changed;
   }
-  return moments.length ? moments.sort((a,b)=>a-b)[moments.length-1] : null;
+  const evidence=taskCompletionEvidence(project,task);
+  if(!evidence.moment) return false;
+  task.doneAt=evidence.moment.toISOString();
+  task.doneDate=dateInputFromTimestamp(evidence.moment);
+  task.doneTimestampSource=`retrospective-${evidence.source}-v17`;
+  if(!task.doneBy) task.doneBy='Historical record';
+  return true;
 }
 
-function stampTaskDoneTransition(task, oldStatus, newStatus){
-  const wasDone = cleanStatus(oldStatus) === "done";
-  const isDone = cleanStatus(newStatus) === "done";
+function stampTaskDoneTransition(task,oldStatus,newStatus){
+  const wasDone=isDoneStatus(oldStatus), isDone=isDoneStatus(newStatus);
   if(!wasDone && isDone){
-    const now = new Date();
-    task.doneAt = now.toISOString();
-    task.doneDate = dateInputFromTimestamp(now);
-  } else if(wasDone && !isDone){
-    delete task.doneAt;
-    delete task.doneDate;
-    delete task.completedAt;
-    delete task.completionTimestamp;
+    const now=new Date();
+    task.doneAt=now.toISOString();
+    task.doneDate=dateInputFromTimestamp(now);
+    task.doneBy=currentUser||currentUserEmail||'Unknown User';
+    task.doneTimestampSource='status-transition-v17';
+    delete task.reopenedAt;
+  }else if(wasDone && !isDone){
+    ['doneAt','doneDate','doneBy','doneTimestampSource','completedAt','completionTimestamp','markedDoneAt'].forEach(key=>delete task[key]);
+    task.reopenedAt=new Date().toISOString();
   }
 }
 
-function getSubStageCompletion(project, stage, sub, backfillMissingDoneAt=false){
-  const tasks = getStageTasks(project, stage, sub);
-  const pendingTasks = tasks.filter(task=>cleanStatus(task.status) !== "done");
-  if(!tasks.length || pendingTasks.length){
-    return { complete:false, actualDate:"", tasks, pendingTasks, changedTasks:[] };
-  }
-
-  const changedTasks = [];
-  const moments = [];
-  tasks.forEach(task=>{
-    let moment = taskCompletionMoment(task);
-    if(!moment) moment = new Date();
-    moments.push(moment);
-    if(backfillMissingDoneAt && !task.doneAt){
-      task.doneAt = moment.toISOString();
-      task.doneDate = dateInputFromTimestamp(moment);
-      changedTasks.push(task);
-    }
-  });
-  const lastMoment = moments.sort((a,b)=>a-b)[moments.length-1];
-  return {
-    complete:true,
-    actualDate:dateInputFromTimestamp(lastMoment),
-    tasks,
-    pendingTasks:[],
-    changedTasks
-  };
+function deriveSubStageDateState(project,stage,sub){
+  const runtime=getProjectRuntime(project); const key=stageDateKey(stage,sub);
+  if(runtime.dateStates.has(key)) return runtime.dateStates.get(key);
+  const tasks=runtime.tasksByGroup.get(key)||[];
+  const allDone=tasks.length>0&&tasks.every(task=>isDoneStatus(task.status));
+  const evidence=allDone?tasks.map(task=>taskCompletionEvidence(project,task)):[];
+  const available=evidence.filter(item=>item.moment);
+  const latest=latestMoment(available);
+  const missingCount=allDone?evidence.filter(item=>!item.moment).length:0;
+  const fallbackCount=allDone?evidence.filter(item=>item.confidence==='fallback').length:0;
+  const verifiedCount=allDone?evidence.filter(item=>item.confidence==='verified').length:0;
+  const automaticDate=latest?dateInputFromTimestamp(latest.moment):'';
+  const state={tasks,allDone,allReliable:allDone&&missingCount===0&&fallbackCount===0,automaticDate,pending:tasks.filter(task=>!isDoneStatus(task.status)).length,missingCount,fallbackCount,verifiedCount,evidence};
+  runtime.dateStates.set(key,state); return state;
 }
 
-function syncSubStageActualDate(project, stage, sub, backfillMissingDoneAt=false){
-  if(!project) return { changed:false, record:null, changedTasks:[], completion:null };
+function synchronizeSubStageActualDate(project,stage,sub){
   ensureStageDates(project);
-  const key = stageDateKey(stage, sub);
-  const rec = project.stageDates[key];
-  const completion = getSubStageCompletion(project, stage, sub, backfillMissingDoneAt);
-  const oldDate = normalizeDateForInput(rec.actualDate) || "";
-  const newDate = completion.complete ? completion.actualDate : "";
-  let changed = oldDate !== newDate;
-  if(changed){
-    rec.actualDate = newDate;
-    rec.actualDateSource = newDate ? "automatic-last-task-done" : "";
-    rec.actualDateUpdatedAt = new Date().toISOString();
+  const rec=getStageDateRecord(project,stage,sub); const state=deriveSubStageDateState(project,stage,sub);
+  const before=`${rec.actualDate||''}|${rec.actualDateSource||''}|${!!rec.actualDateReviewRequired}`;
+  if(!state.allDone){
+    rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false;
+  }else if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){
+    rec.actualDateReviewRequired=false;
+  }else if(state.automaticDate){
+    rec.actualDate=state.automaticDate;
+    rec.actualDateSource=state.missingCount?'automatic-last-available-done-v17-partial':(state.fallbackCount?'automatic-last-task-done-v17-fallback':'automatic-last-task-done-v17-verified');
+    rec.actualDateReviewRequired=state.missingCount>0;
+    rec.actualDateUpdatedBy='System';
+  }else if(normalizeDateForInput(rec.actualDate)){
+    rec.actualDate=normalizeDateForInput(rec.actualDate);
+    rec.actualDateSource=rec.actualDateSource||'legacy-preserved-v17';
+    rec.actualDateReviewRequired=true;
+  }else{
+    rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=true;
   }
-  return { changed, key, record:rec, changedTasks:completion.changedTasks, completion };
+  const after=`${rec.actualDate||''}|${rec.actualDateSource||''}|${!!rec.actualDateReviewRequired}`;
+  if(before!==after){ rec.actualDateUpdatedAt=new Date().toISOString(); return true; }
+  return false;
 }
 
-function firebaseProjectIndex(project){
-  return (db.projects || []).findIndex(item=>item && item.id === project.id);
+function synchronizeAllProjectDates(project){
+  let changed=false;
+  getProjectRuntime(project).groups.forEach(group=>{ if(synchronizeSubStageActualDate(project,group.stage,group.sub)) changed=true; });
+  return changed;
 }
 
-function firebaseTaskIndex(project, task){
-  return (project.tasks || []).findIndex(item=>item && item.id === task.id);
+function prepareDatabaseForSave(){
+  ensureUsers();
+  if(!db.meta||typeof db.meta!=='object') db.meta={};
+  db.meta.updatedAt=new Date().toISOString(); db.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
 }
 
-function saveTargetedUpdates(updates){
-  try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
-  if(!(firebaseReady && firebaseDBRef)){
-    renderAll();
-    return Promise.resolve(true);
+function saveLocalBackup(){
+  try{ localStorage.setItem('projectTrackerDB',JSON.stringify(db)); return true; }
+  catch(error){ console.error('Local backup failed',error); return false; }
+}
+
+function identifiableArray(value){
+  return Array.isArray(value)&&value.every(item=>item&&typeof item==='object'&&!Array.isArray(item)&&item.id!==undefined&&item.id!==null);
+}
+function buildFirebasePatch(base,next,path='',patch={}){
+  if(base===next) return patch;
+  if(Array.isArray(next)){
+    if(!Array.isArray(base)){ if(path) patch[path]=next; return patch; }
+    if(!identifiableArray(next)||!identifiableArray(base)||next.length!==base.length||next.some((item,index)=>String(item.id)!==String(base[index]?.id))){
+      if(JSON.stringify(base)!==JSON.stringify(next)&&path) patch[path]=next;
+      return patch;
+    }
+    next.forEach((item,index)=>buildFirebasePatch(base[index],item,path?`${path}/${index}`:String(index),patch));
+    return patch;
   }
-  if(!firebase.auth().currentUser){
-    alert("Please login first. Firebase Authentication is required to save data.");
-    return Promise.reject(new Error("Not authenticated"));
+  if(next&&typeof next==='object'){
+    if(!base||typeof base!=='object'||Array.isArray(base)){ if(path) patch[path]=next; return patch; }
+    const keys=new Set([...Object.keys(base),...Object.keys(next)]);
+    keys.forEach(key=>{
+      if(path===''&&key==='meta'){
+        buildFirebasePatch(base[key]||{},next[key]||{},'meta',patch);
+      }else buildFirebasePatch(base[key],next[key],path?`${path}/${key}`:key,patch);
+    });
+    return patch;
   }
-  if(!updates || !Object.keys(updates).length){
-    renderAll();
-    return Promise.resolve(true);
-  }
-  return firebaseDBRef.update(updates).then(()=>{
-    renderAll();
-    return true;
-  }).catch(error=>{
-    console.error("Targeted Firebase update failed", error);
-    alert("Could not save the update to Firebase: " + error.message);
-    renderAll();
-    throw error;
+  if(base!==next&&path) patch[path]=next===undefined?null:next;
+  return patch;
+}
+function buildForcedFirebasePatch(payload){
+  const patch={};
+  Object.keys(payload||{}).forEach(key=>{
+    if(key==='meta') return;
+    patch[key]=payload[key]===undefined?null:payload[key];
   });
+  Object.keys(payload?.meta||{}).forEach(key=>{ if(key!=='revision') patch[`meta/${key}`]=payload.meta[key]; });
+  return patch;
+}
+function removeRevisionPatch(patch){ delete patch['meta/revision']; return patch; }
+function withTimeout(promise,ms,message){
+  return Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error(message)),ms))]);
+}
+async function performTargetedFirebaseSave(snapshotPayload,forceFull=false){
+  const base=lastSyncedDatabase||{};
+  const patch=removeRevisionPatch(forceFull?buildForcedFirebasePatch(snapshotPayload):buildFirebasePatch(base,snapshotPayload));
+  const meaningfulPaths=Object.keys(patch).filter(path=>!path.startsWith('meta/'));
+  if(!meaningfulPaths.length&&lastSyncedDatabase){
+    lastSyncedDatabase=deepCloneData(snapshotPayload);
+    return {ok:true,noChanges:true,revision:lastKnownRemoteRevision,paths:0};
+  }
+  patch['meta/revision']=firebase.database.ServerValue.increment(1);
+  await withTimeout(firebaseDBRef.update(patch),15000,'Firebase targeted update timed out');
+  // Keep a conservative local revision. The realtime listener will apply any higher
+  // server revision, including concurrent edits from another user.
+  return {ok:true,revision:lastKnownRemoteRevision+1,paths:Object.keys(patch).length};
 }
 
-function buildBucketFirebaseUpdates(project, syncResult, updates){
-  const pIndex = firebaseProjectIndex(project);
-  if(pIndex < 0 || !syncResult) return;
-  if(syncResult.changed && syncResult.record){
-    updates[`projects/${pIndex}/stageDates/${syncResult.key}`] = syncResult.record;
+function persistDatabase(options={}){
+  const {render=false,silent=false,immediate=false,forceFull=false}=options;
+  prepareDatabaseForSave(); scheduleLocalBackup(immediate);
+  if(render) scheduleActiveRender();
+  if(!(firebaseReady&&firebaseDBRef)) return Promise.resolve({ok:true,localOnly:true});
+  if(!firebase.auth().currentUser){ if(!silent) alert('Please login first. Firebase Authentication is required to save data.'); return Promise.resolve({ok:false,error:new Error('Not authenticated')}); }
+  remoteSavePending=true; remoteSaveImmediate=remoteSaveImmediate||immediate; remoteSaveForceFull=remoteSaveForceFull||forceFull; if(!silent) remoteSaveSilent=false;
+  const promise=new Promise(resolve=>remoteSaveWaiters.push(resolve));
+  clearTimeout(remoteSaveTimer); remoteSaveTimer=setTimeout(flushRemoteSave,immediate?0:320);
+  return promise;
+}
+async function flushRemoteSave(){
+  if(remoteSaveInFlight||!remoteSavePending) return;
+  remoteSavePending=false; remoteSaveInFlight=true; saveInProgress=true;
+  const waiters=remoteSaveWaiters.splice(0); const silent=remoteSaveSilent; const forceFull=remoteSaveForceFull;
+  remoteSaveSilent=true; remoteSaveImmediate=false; remoteSaveForceFull=false;
+  const payload=deepCloneData(db);
+  try{
+    const result=await performTargetedFirebaseSave(payload,forceFull);
+    if(result.ok){
+      lastKnownRemoteRevision=Number(result.revision||lastKnownRemoteRevision);
+      if(!db.meta||typeof db.meta!=='object') db.meta={};
+      db.meta.revision=lastKnownRemoteRevision;
+      payload.meta=payload.meta||{}; payload.meta.revision=lastKnownRemoteRevision;
+      lastSyncedDatabase=deepCloneData(payload);
+      scheduleLocalBackup();
+    }else if(!silent) alert('Could not save to Firebase. Your browser backup was retained.');
+    waiters.forEach(resolve=>resolve(result));
+  }catch(error){
+    console.error('Targeted Firebase save failed',error); const result={ok:false,error}; waiters.forEach(resolve=>resolve(result));
+    if(!silent) alert('Could not save to Firebase. Your browser backup was retained.');
+  }finally{
+    remoteSaveInFlight=false; saveInProgress=false;
+    if(remoteSavePending){ clearTimeout(remoteSaveTimer); remoteSaveTimer=setTimeout(flushRemoteSave,120); }
+    else applyDeferredRemoteSnapshot();
   }
-  (syncResult.changedTasks || []).forEach(task=>{
-    const tIndex = firebaseTaskIndex(project, task);
-    if(tIndex >= 0) updates[`projects/${pIndex}/tasks/${tIndex}`] = task;
-  });
 }
 
-updateTaskField = function(projectId, taskId, field, value){
-  const project = (db.projects || []).find(item=>item.id===projectId); if(!project) return;
-  const task = (project.tasks || []).find(item=>item.id===taskId); if(!task) return;
-  if(!canEditTask(task)){ alert("You can only update tasks assigned to you."); renderProject(); return; }
-  if(field === "owner" && !(currentUserRole === "Admin" || currentUserRole === "PM")){
-    alert("Only Admin/PM can change owner."); renderProject(); return;
-  }
-  const oldValue = task[field] || "";
-  if(oldValue === value) return;
-  const oldStage = task.stage;
-  const oldSub = task.sub;
-  if(field === "status") stampTaskDoneTransition(task, oldValue, value);
-  task[field] = value;
-  task.lastUpdated = new Date().toISOString();
-  const details = `${field} changed from "${oldValue}" to "${value}"`;
-  addHistory(task, "Updated", details);
-  addGlobalActivity(project, task, "Task Updated", details);
+function save(){ scheduleActiveRender(); return persistDatabase(); }
 
-  const updates = {};
-  const pIndex = firebaseProjectIndex(project);
-  const tIndex = firebaseTaskIndex(project, task);
-  if(pIndex >= 0 && tIndex >= 0) updates[`projects/${pIndex}/tasks/${tIndex}`] = task;
+function clearActualDateBeforeReopen(project,stage,sub){
+  ensureStageDates(project); const rec=getStageDateRecord(project,stage,sub);
+  if(!rec.actualDate) return true;
+  const label=isManualActualDate(rec)?'manually corrected':'automatic';
+  if(!confirm(`This Sub-stage has an ${label} Actual Date (${formatDateDisplay(rec.actualDate)}). Reopening the task will clear it. Continue?`)) return false;
+  rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString();
+  invalidateProjectCache(project); return true;
+}
 
-  buildBucketFirebaseUpdates(project, syncSubStageActualDate(project, oldStage, oldSub, true), updates);
-  if(stageDateKey(oldStage, oldSub) !== stageDateKey(task.stage, task.sub)){
-    buildBucketFirebaseUpdates(project, syncSubStageActualDate(project, task.stage, task.sub, true), updates);
-  }
-  updates.activity = db.activity || [];
-  saveTargetedUpdates(updates);
-};
+function updateTaskField(projectId,taskId,field,value){
+  const project=(db.projects||[]).find(item=>item.id===projectId); const task=(project?.tasks||[]).find(item=>item.id===taskId);
+  if(!project||!task) return;
+  if(!canEditTask(task)){ alert('You can only update tasks assigned to you.'); scheduleActiveRender('project'); return; }
+  if(field==='owner'&&!canEditProject()){ alert('Only Admin/PM can change owner.'); scheduleActiveRender('project'); return; }
+  const oldValue=task[field]||''; if(String(oldValue)===String(value)) return;
+  const oldStage=task.stage,oldSub=task.sub; const structural=field==='stage'||field==='sub';
+  if(field==='status'&&isDoneStatus(oldValue)&&!isDoneStatus(value)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)){ scheduleActiveRender('project'); return; }
+  if(field==='status') stampTaskDoneTransition(task,oldValue,value);
+  task[field]=value; task.lastUpdated=new Date().toISOString();
+  const detail=`${field} changed from "${oldValue}" to "${value}"`; addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail);
+  invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
+  synchronizeSubStageActualDate(project,oldStage,oldSub); synchronizeSubStageActualDate(project,task.stage,task.sub);
+  scheduleActiveRender('project'); void persistDatabase();
+}
 
-saveTask = function(id){
-  const project=(db.projects || []).find(item=>item.id===currentProjectId); if(!project) return;
-  const data={stage:v("stage"),sub:v("sub"),technicalTask:v("technicalTask"),dept:document.getElementById("f_dept").value,task:document.getElementById("f_task").value.trim(),owner:v("owner"),planning:v("planning"),visitorPerson:v("visitorPerson"),siteReport:v("siteReport"),checkPoints:v("checkPoints"),checkingPerson:v("checkingPerson"),qualityCheckReport:v("qualityCheckReport"),monthlyCorrespondence:v("monthlyCorrespondence"),budget:v("budget"),expensesIncurred:v("expensesIncurred"),plannedBilling:v("plannedBilling"),actualBilling:v("actualBilling"),collection:v("collection"),status:document.getElementById("f_status").value,remarks:document.getElementById("f_remarks").value.trim(),delayReason:document.getElementById("f_delayReason").value.trim(),lastUpdated:new Date().toISOString()};
-  const updates = {};
-  const pIndex = firebaseProjectIndex(project);
+function collectTaskFormData(){
+  const taskName=document.getElementById('f_task')?.value.trim()||'';
+  const stage=v('stage'), sub=v('sub');
+  if(!stage||!sub||!taskName){ alert('Stage, Sub-stage and Task are required.'); return null; }
+  return {stage,sub,technicalTask:v('technicalTask'),dept:document.getElementById('f_dept')?.value||'',task:taskName,owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status')?.value||'To Do',remarks:document.getElementById('f_remarks')?.value.trim()||'',delayReason:document.getElementById('f_delayReason')?.value.trim()||'',lastUpdated:new Date().toISOString()};
+}
 
+function saveTask(id){
+  const project=(db.projects||[]).find(item=>item.id===currentProjectId); if(!project) return;
+  const data=collectTaskFormData(); if(!data) return;
   if(id){
-    const task=(project.tasks || []).find(item=>item.id===id); if(!task) return;
-    const oldStage=task.stage, oldSub=task.sub, oldStatus=task.status;
-    stampTaskDoneTransition(task, oldStatus, data.status);
-    const changes=[];
-    ["stage","sub","dept","task","owner","status","remarks","delayReason"].forEach(key=>{
-      if((task[key]||"") !== (data[key]||"")) changes.push(`${key}: "${task[key]||""}" → "${data[key]||""}"`);
-    });
-    Object.assign(task,data);
-    if(changes.length){
-      const detailText=changes.join("; ");
-      addHistory(task,"Updated",detailText);
-      addGlobalActivity(project,task,"Task Updated",detailText);
-    }
-    const tIndex=firebaseTaskIndex(project,task);
-    if(pIndex>=0 && tIndex>=0) updates[`projects/${pIndex}/tasks/${tIndex}`]=task;
-    buildBucketFirebaseUpdates(project,syncSubStageActualDate(project,oldStage,oldSub,true),updates);
-    if(stageDateKey(oldStage,oldSub)!==stageDateKey(task.stage,task.sub)){
-      buildBucketFirebaseUpdates(project,syncSubStageActualDate(project,task.stage,task.sub,true),updates);
-    }
-  } else {
-    const task={id:uid(),...data,history:[]};
-    stampTaskDoneTransition(task,"To Do",task.status);
-    addHistory(task,"Created","Task manually added");
-    project.tasks.push(task);
-    addGlobalActivity(project,task,"Task Created","Task manually added");
-    if(pIndex>=0) updates[`projects/${pIndex}/tasks`] = project.tasks;
-    buildBucketFirebaseUpdates(project,syncSubStageActualDate(project,task.stage,task.sub,true),updates);
+    const task=(project.tasks||[]).find(item=>item.id===id); if(!task) return;
+    if(!canFullEditTask(task)){ alert('You do not have permission to edit this task.'); return; }
+    const oldStage=task.stage,oldSub=task.sub,oldStatus=task.status;
+    if(isDoneStatus(oldStatus)&&!isDoneStatus(data.status)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)) return;
+    stampTaskDoneTransition(task,oldStatus,data.status);
+    const changes=[]; Object.keys(data).forEach(key=>{ if(key!=='lastUpdated'&&String(task[key]||'')!==String(data[key]||'')) changes.push(`${key}: "${task[key]||''}" → "${data[key]||''}"`); });
+    const structural=task.stage!==data.stage||task.sub!==data.sub; Object.assign(task,data);
+    if(changes.length){ const detail=changes.join('; '); addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail); }
+    invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
+    synchronizeSubStageActualDate(project,oldStage,oldSub); synchronizeSubStageActualDate(project,task.stage,task.sub);
+  }else{
+    const task={id:uid(),...data,history:[]}; stampTaskDoneTransition(task,'To Do',task.status); addHistory(task,'Created','Task manually added'); project.tasks.push(task); addGlobalActivity(project,task,'Task Created','Task manually added');
+    invalidateProjectCache(project,true); ensureStageDates(project); synchronizeSubStageActualDate(project,task.stage,task.sub);
   }
-  updates.activity = db.activity || [];
-  closeModal();
-  saveTargetedUpdates(updates);
-};
-
-renderStageDateTable = function(project){
-  const table=document.getElementById("stageDateTable"); if(!table) return;
-  ensureStageDates(project);
-  const groups=getProjectStageGroups(project);
-  let html=`<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Status</th><th>Pending</th><th>Completion Diagnostic</th></tr>`;
-  groups.forEach(group=>{
-    const rec=getStageDateRecord(project,group.stage,group.sub);
-    const completion=getSubStageCompletion(project,group.stage,group.sub,false);
-    const pending=completion.pendingTasks.length;
-    const status=completion.complete ? "Completed" : (completion.tasks.some(task=>cleanStatus(task.status)==="in progress") ? "In Progress" : "Pending");
-    const diagnostic = completion.complete
-      ? `All ${completion.tasks.length} task(s) completed`
-      : (!completion.tasks.length ? "No tasks in this bucket" : completion.pendingTasks.slice(0,3).map(task=>task.task || "Unnamed task").join("; ") + (pending>3 ? `; +${pending-3} more` : ""));
-    html += `<tr>
-      <td>${esc(group.stage)}</td>
-      <td>${esc(group.sub)}</td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||"")}" onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td>
-      <td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||"")}" readonly title="Automatically filled from the final task marked Done in this sub-stage"></td>
-      <td>${esc(status)}</td>
-      <td>${pending}</td>
-      <td>${esc(diagnostic)}</td>
-    </tr>`;
-  });
-  table.innerHTML=html;
-};
-
-let retrospectiveSyncRunning = false;
-function runRetrospectiveSubStageSyncOnce(){
-  if(retrospectiveSyncRunning) return Promise.resolve(false);
-  retrospectiveSyncRunning = true;
-  const updates = {};
-  let changed = false;
-  (db.projects || []).forEach(project=>{
-    ensureStageDates(project);
-    getProjectStageGroups(project).forEach(group=>{
-      const result = syncSubStageActualDate(project,group.stage,group.sub,true);
-      if(result.changed || result.changedTasks.length){
-        changed = true;
-        buildBucketFirebaseUpdates(project,result,updates);
-      }
-    });
-  });
-  try { localStorage.setItem("projectTrackerDB", JSON.stringify(db)); } catch(e) {}
-  if(!changed || !(firebaseReady && firebaseDBRef) || !firebase.auth().currentUser){
-    retrospectiveSyncRunning = false;
-    return Promise.resolve(changed);
-  }
-  return firebaseDBRef.update(updates)
-    .then(()=>true)
-    .catch(error=>{
-      console.error("Retrospective sub-stage date update failed",error);
-      return false;
-    })
-    .finally(()=>{ retrospectiveSyncRunning=false; });
+  closeModal(); scheduleActiveRender('project'); void persistDatabase();
 }
 
-// Rendering remains read-only. Date calculations are persisted only by task updates
-// or the controlled retrospective migration above.
-/* ===== END BUG-FIXED SUB-STAGE ACTUAL DATE ENGINE ===== */
+function setHistoricalActualDate(projectId,key,value){
+  if(!requirePermission(canEditProject(),'Only Admin/PM can correct historical Actual Dates.')) return;
+  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return; const state=deriveSubStageDateState(project,rec.stage,rec.sub);
+  if(!state.allDone){ alert('The Actual Date can be entered only after every task in this Sub-stage is Done.'); scheduleActiveRender('project'); return; }
+  const date=normalizeDateForInput(value); if(!date){ alert('Please select a valid Actual Date.'); scheduleActiveRender('project'); return; }
+  if(date>today()){ alert('Actual Date cannot be in the future.'); scheduleActiveRender('project'); return; }
+  const old=normalizeDateForInput(rec.actualDate)||''; rec.actualDate=date; rec.actualDateSource='manual-historical-v17'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString(); rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
+  addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Historical Actual Date Corrected',`Actual Date changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)}" by ${rec.actualDateUpdatedBy}`);
+  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase();
+}
 
+function resetActualDateToAuto(projectId,key){
+  if(!requirePermission(canEditProject(),'Only Admin/PM can reset Actual Dates.')) return;
+  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return; rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false;
+  invalidateProjectCache(project); synchronizeSubStageActualDate(project,rec.stage,rec.sub);
+  addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Actual Date Reset',rec.actualDate?`Reset to automatic date ${formatDateDisplay(rec.actualDate)}`:'Automatic date unavailable; manual historical date is required');
+  scheduleActiveRender('project'); void persistDatabase();
+}
 
-initAuthState();
+function updateStageDate(projectId,key,field,value){
+  if(field==='actualDate'){ setHistoricalActualDate(projectId,key,value); return; }
+  if(!requirePermission(canEditProject(),'Only Admin/PM can update stage dates.')) return;
+  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
+  const rec=project.stageDates[key]; if(!rec) return; const date=normalizeDateForInput(value),old=rec[field]||''; if(old===date) return;
+  rec[field]=date; addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Stage Date Updated',`Planned date changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)||'-'}"`);
+  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase();
+}
+
+function renderStageDateTable(project){
+  const table=document.getElementById('stageDateTable'); if(!table) return; ensureStageDates(project);
+  const editable=canEditProject(); const groups=getProjectRuntime(project).groups;
+  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Date Mode</th><th>Completion Evidence</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>';
+  groups.forEach(group=>{
+    const rec=getStageDateRecord(project,group.stage,group.sub); const state=deriveSubStageDateState(project,group.stage,group.sub);
+    const manual=isManualActualDate(rec); const automatic=String(rec.actualDateSource||'').startsWith('automatic-');
+    const status=state.allDone?'Completed':(state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
+    const needsManual=state.allDone&&!state.automaticDate&&!manual; let actualCell,mode;
+    if(state.allDone&&(manual||needsManual)){
+      actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.actualDate)||'')}" ${editable?'':'disabled'} onchange="setHistoricalActualDate('${project.id}','${escAttr(group.key)}',this.value)" title="Historical completion date">${manual&&editable?`<button type="button" onclick="resetActualDateToAuto('${project.id}','${escAttr(group.key)}')">Reset Auto</button>`:''}</div>`;
+      mode=manual?'Manual':'Manual date required';
+    }else{
+      actualCell=`<input class="inline-input" type="date" value="${escAttr(automatic?(normalizeDateForInput(rec.actualDate)||''):state.automaticDate)}" readonly title="Latest available completion date from the tasks in this exact Sub-stage">`;
+      mode=state.allDone?(state.missingCount?'Auto · partial evidence':(state.fallbackCount?'Auto · Last Updated fallback':'Auto · verified')):'Not completed';
+    }
+    const evidence=state.allDone?`${state.verifiedCount} verified${state.fallbackCount?`, ${state.fallbackCount} fallback`:''}${state.missingCount?`, ${state.missingCount} missing`:''}`:'—';
+    html+=`<tr><td>${esc(group.stage)}</td><td>${esc(group.sub)}</td><td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td><td>${actualCell}</td><td><span class="pill">${esc(mode)}</span></td><td>${esc(evidence)}</td><td>${esc(status)}</td><td>${state.pending}</td></tr>`;
+  }); table.innerHTML=html;
+}
+
+async function runRetrospectiveSubStageSyncOnce(options={}){
+  const {notify=false}=options||{};
+  if(notify&&!requirePermission(canEditProject(),'Only Admin/PM can run historical Actual Date reconciliation.')) return false;
+  if(retrospectiveSyncScheduled) return false;
+  retrospectiveSyncScheduled=true;
+  let changed=false,backfilled=0,updatedDates=0,completedGroups=0;
+  try{
+    resetRuntimeCaches();
+    (db.projects||[]).forEach(project=>{
+      ensureStageDates(project);
+      (project.tasks||[]).forEach(task=>{ if(backfillTaskCompletionTimestamp(project,task)){ backfilled++; changed=true; } });
+      invalidateProjectCache(project);
+      getProjectRuntime(project).groups.forEach(group=>{
+        const state=deriveSubStageDateState(project,group.stage,group.sub);
+        if(state.allDone) completedGroups++;
+        if(synchronizeSubStageActualDate(project,group.stage,group.sub)){ updatedDates++; changed=true; }
+      });
+    });
+    if(changed) await persistDatabase({silent:!notify,immediate:true});
+    scheduleActiveRender();
+    if(notify) alert(changed?`Actual Dates reconciled. ${backfilled} task completion timestamp(s) recovered and ${updatedDates} Sub-stage date(s) updated.`:`Actual Dates are already synchronized across ${completedGroups} completed Sub-stage(s).`);
+    return changed;
+  }finally{
+    retrospectiveSyncScheduled=false;
+  }
+}
+
+/* ===== END PERFORMANCE + ACTUAL DATE ENGINE V17 ===== */
+
+async function bootstrapProjectTracker(){
+  showLoginScreen();
+  setLoginStatus("Loading secure login services…");
+  try{
+    await initializeFirebaseServices();
+    initAuthState();
+  }catch(error){
+    // The login screen remains responsive and explains the connection problem.
+    console.error("Project Tracker bootstrap failed",error);
+  }
+}
+
+bootstrapProjectTracker();
 </script>
 </body>
 </html>
