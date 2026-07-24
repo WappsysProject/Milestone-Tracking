@@ -2479,13 +2479,13 @@ function synchronizeSubStageActualDate(project,stage,sub){
     evidence:rec.actualDateEvidence||null
   });
 
-  if(!state.allDone){
+  if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){
+    rec.actualDateReviewRequired=false;
+  }else if(!state.allDone){
     rec.actualDate='';
     rec.actualDateSource='';
     rec.actualDateReviewRequired=false;
     delete rec.actualDateEvidence;
-  }else if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){
-    rec.actualDateReviewRequired=false;
   }else if(state.canAutoDate){
     rec.actualDate=state.automaticDate;
     rec.actualDateSource=completionSourceForRecord(state.latestEvidence?.source);
@@ -2679,8 +2679,7 @@ function saveTask(id){
 function setHistoricalActualDate(projectId,key,value){
   if(!requirePermission(canEditProject(),'Only Admin/PM can correct historical Actual Dates.')) return;
   const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
-  const rec=project.stageDates[key]; if(!rec) return; const state=deriveSubStageDateState(project,rec.stage,rec.sub);
-  if(!state.allDone){ alert('The Actual Date can be entered only after every task in this Sub-stage is Done.'); scheduleActiveRender('project'); return; }
+  const rec=project.stageDates[key]; if(!rec) return;
   const date=normalizeDateForInput(value); if(!date){ alert('Please select a valid Actual Date.'); scheduleActiveRender('project'); return; }
   if(date>today()){ alert('Actual Date cannot be in the future.'); scheduleActiveRender('project'); return; }
   const old=normalizeDateForInput(rec.actualDate)||''; rec.actualDate=date; rec.actualDateSource='manual-historical-v19'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString(); rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
@@ -2723,15 +2722,12 @@ function renderStageDateTable(project){
     const manual=isManualActualDate(rec); const automatic=String(rec.actualDateSource||'').startsWith('automatic-');
     const status=state.allDone?'Completed':(state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
     const needsManual=state.allDone&&!state.canAutoDate&&!manual; let actualCell,mode;
-    if(state.allDone){
-      const autoTitle=state.usesLastUpdatedFallback?'Automatically calculated from the latest Done log/doneAt/Last Updated among completed tasks. You can correct it using the calendar.':'Automatically calculated from the latest Done-status log or stored Done timestamp. You can correct it using the calendar.';
-      const actualValue=normalizeDateForInput(rec.actualDate)||state.automaticDate||'';
-      actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(actualValue)}" ${editable?'':'disabled'} onchange="setHistoricalActualDate('${project.id}','${escAttr(group.key)}',this.value)" title="${escAttr(autoTitle)}">${manual&&editable?`<button type="button" onclick="resetActualDateToAuto('${project.id}','${escAttr(group.key)}')">Reset Auto</button>`:''}</div>`;
-      mode=manual?'Manual':(state.canAutoDate?(state.usesLastUpdatedFallback?'Auto (Done/Last Updated)':'Auto (Done log/time)'):'Manual date required');
-    }else{
-      actualCell=`<input class="inline-input" type="date" value="" readonly title="Actual Date becomes editable after every task in this Sub-stage is Done">`;
-      mode='Not completed';
-    }
+    const autoTitle=state.allDone
+      ? (state.usesLastUpdatedFallback?'Automatically calculated from the latest Done log/doneAt/Last Updated among completed tasks. You can correct it using the calendar.':'Automatically calculated from the latest Done-status log or stored Done timestamp. You can correct it using the calendar.')
+      : 'Select or edit the Sub-stage Actual Date using the calendar.';
+    const actualValue=normalizeDateForInput(rec.actualDate)||(state.allDone?state.automaticDate:'')||'';
+    actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(actualValue)}" ${editable?'':'disabled'} onchange="setHistoricalActualDate('${project.id}','${escAttr(group.key)}',this.value)" title="${escAttr(autoTitle)}">${manual&&editable?`<button type="button" onclick="resetActualDateToAuto('${project.id}','${escAttr(group.key)}')">Reset Auto</button>`:''}</div>`;
+    mode=manual?'Manual':(state.allDone?(state.canAutoDate?(state.usesLastUpdatedFallback?'Auto (Done/Last Updated)':'Auto (Done log/time)'):'Manual date required'):'Not completed');
     html+=`<tr><td>${esc(group.stage)}</td><td>${esc(group.sub)}</td><td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td><td>${actualCell}</td><td><span class="pill">${esc(mode)}</span></td><td>${esc(status)}</td><td>${state.pending}</td></tr>`;
   }); table.innerHTML=html;
 }
