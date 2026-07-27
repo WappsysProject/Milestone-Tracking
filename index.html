@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
-  <title>Project Tracking Dashboard V21</title>
+  <title>Project Tracking Dashboard V22 - Team Dashboard</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -48,13 +48,19 @@
     th{background:#eaf2f8;text-align:left;position:static;z-index:1}
 
     /* Freeze table heading rows while scrolling large task/MIS tables */
+    #taskTableScroll{
+      max-height:72vh;
+      overflow:auto;
+      position:relative;
+      scrollbar-gutter:stable;
+    }
     #taskTable th,
     #misTable th{
       position:sticky;
       top:0;
-      z-index:5;
+      z-index:8;
       background:#eaf2f8;
-      box-shadow:0 2px 4px rgba(15,23,42,.08);
+      box-shadow:0 2px 4px rgba(15,23,42,.12);
     }
     tr.stage-row td{background:var(--stage);font-weight:800;color:#111}
     tr.substage-row td{background:#f8fafc;font-weight:800}
@@ -109,42 +115,24 @@
 
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
-
-    /* Detailed Task Tracker: one continuous task list with a reliably frozen column heading. */
-    .task-table-scroll{
-      height:72vh;
-      max-height:72vh;
-      overflow:auto;
-      position:relative;
-      isolation:isolate;
-      scrollbar-gutter:stable both-edges;
-      overscroll-behavior:contain;
-    }
-    .task-table-scroll #taskTable{
-      border-collapse:separate;
-      border-spacing:0;
-    }
-    .task-table-scroll #taskTable thead{
-      position:sticky;
-      top:0;
-      z-index:30;
-    }
-    .task-table-scroll #taskTable thead th{
-      position:sticky;
-      top:0;
-      z-index:31;
-      background:#eaf2f8;
-      box-shadow:0 2px 5px rgba(15,23,42,.20);
-      background-clip:padding-box;
-    }
-    @media(max-width:760px){
-      .task-table-scroll{height:auto;max-height:none;overflow:visible;border:0}
-    }
-
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
 
     /* Render every task row normally so no rows are clipped or skipped. */
     .saving-indicator{font-weight:700}
+
+    /* Team-wise planning dashboard */
+    .team-kpi{cursor:pointer;transition:.15s}
+    .team-kpi:hover{transform:translateY(-2px);border-color:var(--accent2)}
+    .team-kpi.active{outline:3px solid rgba(37,99,235,.18);border-color:var(--accent2)}
+    .team-dashboard-note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px;color:#1e3a8a;font-size:12px}
+    .team-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px}
+    @media(max-width:900px){.team-filter-grid{grid-template-columns:1fr}}
+    .period-overdue{background:#fee2e2;color:#991b1b}
+    .period-this-week{background:#dbeafe;color:#1e40af}
+    .period-next-week{background:#e0f2fe;color:#075985}
+    .period-this-month{background:#ede9fe;color:#5b21b6}
+    .period-next-month{background:#fef3c7;color:#92400e}
+    .period-no-date{background:#f1f5f9;color:#475569}
   </style>
 </head>
 <body>
@@ -170,6 +158,7 @@
   <section id="app" class="hidden">
     <div class="tabs">
       <div class="tab active" id="dashboardTab" onclick="showDashboard()">All Projects Dashboard</div>
+      <div class="tab" id="teamDashboardTab" onclick="showTeamDashboard()">Team-wise Dashboard</div>
       <div class="tab" id="projectTab" onclick="showProjectView()">Project Tracker</div>
       <div class="tab" id="misTab" onclick="showMIS()">MIS Summary</div>
       <div class="tab" id="setupTab" onclick="showSetup()">Setup / Backup</div>
@@ -253,6 +242,57 @@
       <div id="projectsList" class="grid grid-3"></div>
     </section>
 
+    <section id="teamDashboardView" class="hidden">
+      <div class="card">
+        <div class="toolbar">
+          <div>
+            <h2 style="margin:0">Team-wise Task Dashboard</h2>
+            <p class="muted" style="margin:4px 0 0">Live team and project pipeline view using the same tasks and sub-stage planned dates maintained in Project Tracker.</p>
+          </div>
+          <div class="row">
+            <button class="blue" onclick="exportTeamDashboardCSV()">Export Team CSV</button>
+            <button onclick="renderTeamDashboard()">Refresh Dashboard</button>
+          </div>
+        </div>
+        <div class="team-dashboard-note" style="margin-top:12px">
+          A task is treated as <b>pending</b> until its status is Done. Its due date comes directly from <b>Project Tracker → Sub-stage-wise Dates → Planned Date</b>, so any date changed in the tracker is immediately reflected here. Weeks run Monday to Sunday.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0">Filters</h3>
+        <div class="team-filter-grid">
+          <div><label>Team / Sub-team</label><select id="teamDashboardTeam" onchange="scheduleTeamDashboardRender(0)"><option value="">All Teams</option></select></div>
+          <div><label>Project in Pipeline</label><select id="teamDashboardProject" onchange="scheduleTeamDashboardRender(0)"><option value="">All Projects</option></select></div>
+          <div><label>Owner</label><input id="teamDashboardOwner" placeholder="Search owner name/email" oninput="scheduleTeamDashboardRender()"></div>
+          <div><label>Task Status</label><select id="teamDashboardStatus" onchange="scheduleTeamDashboardRender(0)"><option value="">All Pending Status</option><option>To Do</option><option>In Progress</option></select></div>
+          <div><label>Due Period</label><select id="teamDashboardBucket" onchange="scheduleTeamDashboardRender(0)"><option value="all">All Pending</option><option value="thisWeek">This Week</option><option value="nextWeek">Next Week</option><option value="thisMonth">This Month</option><option value="nextMonth">Next Month</option><option value="overdue">Overdue</option><option value="noDate">No Planned Date</option></select></div>
+          <div><label>Search</label><input id="teamDashboardSearch" placeholder="Task, stage, job code, client..." oninput="scheduleTeamDashboardRender()"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-3">
+        <div class="kpi team-kpi" data-team-bucket="thisWeek" onclick="setTeamDashboardBucket('thisWeek')"><div class="lbl">Due This Week</div><div class="num" id="teamKpiThisWeek">0</div></div>
+        <div class="kpi team-kpi" data-team-bucket="nextWeek" onclick="setTeamDashboardBucket('nextWeek')"><div class="lbl">Due Next Week</div><div class="num" id="teamKpiNextWeek">0</div></div>
+        <div class="kpi team-kpi" data-team-bucket="thisMonth" onclick="setTeamDashboardBucket('thisMonth')"><div class="lbl">Due This Month</div><div class="num" id="teamKpiThisMonth">0</div></div>
+        <div class="kpi team-kpi" data-team-bucket="nextMonth" onclick="setTeamDashboardBucket('nextMonth')"><div class="lbl">Due Next Month</div><div class="num" id="teamKpiNextMonth">0</div></div>
+        <div class="kpi team-kpi" data-team-bucket="all" onclick="setTeamDashboardBucket('all')"><div class="lbl">Pending Tasks</div><div class="num" id="teamKpiPending">0</div></div>
+        <div class="kpi team-kpi" data-team-bucket="overdue" onclick="setTeamDashboardBucket('overdue')"><div class="lbl">Overdue Tasks</div><div class="num" id="teamKpiOverdue">0</div></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="toolbar">
+          <div>
+            <h3 style="margin:0">Filtered Team Tasks</h3>
+            <p class="muted" id="teamDashboardCount" style="margin:4px 0 0">0 tasks</p>
+          </div>
+        </div>
+        <div class="table-scroll" style="overflow:auto;max-height:72vh;margin-top:12px">
+          <table id="teamTaskTable"></table>
+        </div>
+      </div>
+    </section>
+
     <section id="projectView" class="hidden">
       <div class="card">
         <div class="toolbar">
@@ -297,7 +337,7 @@
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
         </div>
-        <div class="table-scroll task-table-scroll" style="margin-top:12px">
+        <div id="taskTableScroll" class="table-scroll" style="margin-top:12px">
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
@@ -378,7 +418,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V22 | All matching tasks visible with no row limits</div>
+<div class="footer">Project Tracker V22 | Team-wise due dashboard linked with the project tracker</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -391,6 +431,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
 <script>
 const STATUS = ["To Do","In Progress","Done"];
 const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","Projects Team","Transition Team","Billing"];
+const TECHNICAL_TEAMS = ["Process Team","Detail Engg. Team","Electrical Team","Project Team"];
 let db = { projects: [] };
 let currentProjectId = null;
 let currentUser = "Unknown User";
@@ -407,6 +448,7 @@ let activeRenderFrame = 0;
 let dashboardFilterTimer = 0;
 let projectFilterTimer = 0;
 let misFilterTimer = 0;
+let teamDashboardFilterTimer = 0;
 let localBackupTimer = 0;
 let localBackupIdleHandle = 0;
 let remoteSaveTimer = 0;
@@ -469,6 +511,7 @@ function getProjectRuntime(project){
   return runtime;
 }
 function getActiveViewName(){
+  if(!document.getElementById('teamDashboardView')?.classList.contains('hidden')) return 'team';
   if(!document.getElementById('projectView')?.classList.contains('hidden')) return 'project';
   if(!document.getElementById('misView')?.classList.contains('hidden')) return 'mis';
   if(!document.getElementById('setupView')?.classList.contains('hidden')) return 'setup';
@@ -479,7 +522,8 @@ function scheduleActiveRender(view=getActiveViewName()){
   activeRenderFrame=requestAnimationFrame(()=>{
     activeRenderFrame=0;
     updateUserProfileBox();
-    if(view==='project') renderProject();
+    if(view==='team') renderTeamDashboard();
+    else if(view==='project') renderProject();
     else if(view==='mis'){ renderMIS(); renderMISDashboard(); }
     else if(view==='dashboard') renderDashboard();
   });
@@ -495,6 +539,10 @@ function scheduleProjectFilterRender(delay=140){
 function scheduleMISFilterRender(delay=140){
   clearTimeout(misFilterTimer);
   misFilterTimer=setTimeout(()=>renderMIS(),delay);
+}
+function scheduleTeamDashboardRender(delay=140){
+  clearTimeout(teamDashboardFilterTimer);
+  teamDashboardFilterTimer=setTimeout(()=>renderTeamDashboard(),delay);
 }
 function renderFilteredTasks(){ scheduleActiveRender('project'); }
 function scheduleLocalBackup(immediate=false){
@@ -739,27 +787,27 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Design Calculations", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"TDS Preparation after cost comparison of various make", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"P&ID", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Control Philosophy", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 1", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Details Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client scope finalisation with Quality control", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GA & SLD with Load List", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval - Panel Foundation", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Panel Foundation", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Cable Tray Layout", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg."},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Automation Logic", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Note for Transition Team", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engineering Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Submittals / Approval", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Site Visit if Required", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Technical Review Agenda", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Eng Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Eng Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Initial Note with Costing for Internal Approval", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3A Preparation", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Electrical Submittal / Approval", technicalTask:"Electrical Team"},
@@ -783,7 +831,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Billing Plan Review"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Micro Billing Plan"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Understand RA bill formats and billing procedure"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engineering Team"},
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement plan, logistics plan and ordering long delivery items"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Final Closure"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement Plan"},
@@ -791,8 +839,8 @@ const WORKFLOW_TEMPLATE = [
 
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Contracts & Commercial", task:"Oversee site mobilisation preparation and ensure client cashflow is available"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Final TDS / Inputs", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Eng Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Site mobilization file checking and training to site person"},
@@ -800,16 +848,16 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Billing", task:"Document Submission (BG, ABG, PBG, RBG, CAR, WC)"},
 
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Contracts & Commercial", task:"Check E-way bill, RA bill and related documents as per site requirement"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Eng Team"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Engg. Team"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"TCs, challans, vendor coordination and material dispatch tracking"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"Logistic / Dispatch Plan"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"QC / Test Certificates"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Projects Team", task:"Verify site mobilisation file, budget, MIR documents, material receipt and security"},
 
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Contracts & Commercial", task:"Review site expense budget and closure plan"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Eng Team"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Engg. Team"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Any deviation with TDS related to E&I", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Purchase Team", task:"Review pending material/order and logistics with projects"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Final check of client work, status and snags"},
@@ -822,7 +870,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget and schedule control"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Client feedback"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing and collection"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Engg. Team"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Purchase Team", task:"Share vendor visit details and supply material for indents"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Execution start"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Set quality control procedures and welding list"},
@@ -831,18 +879,18 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Escalation if any"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Billing", task:"Collection"},
 
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Eng Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Eng Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Engg. Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit / Quality Check", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Details Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Detail Engg. Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Completion certification from the transition team", technicalTask:"Project Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Vendor visit list and coordination"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Supply material of indent 6"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Projects Team", task:"De-snagging, transition team visit, indent 7/8, optional QC visit and demobilisation control"},
 
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Contracts & Commercial", task:"Electrical budget if any deviation"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Engg. Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Measuring of electrical progress", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Panel Started as per approved TDS", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"PLC Programming & Automation Testing", technicalTask:"Electrical Team"},
@@ -850,7 +898,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Projects Team", task:"De-snagging of mechanical work"},
 
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Engg. Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Checklist Approval (Dry/Wet Run)", technicalTask:"Process Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Electrical checklist (Continuity, rotation, Ampere)", technicalTask:"Electrical Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Sites - Dry Run / Wet Run Go-Ahead", technicalTask:"Electrical Team"},
@@ -861,9 +909,9 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Transition Team", task:"Snag points / modification if any"},
 
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Eng Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Eng Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Engg. Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Engg. Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Engg. Team"},
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
 
@@ -881,7 +929,10 @@ const WORKFLOW_TEMPLATE = [
 ];
 
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
-function today(){ return new Date().toISOString().slice(0,10); }
+function today(){
+  const d=new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 function parseDateFlexible(dateStr){
   if(!dateStr) return null;
@@ -1062,6 +1113,28 @@ function getLatestStageDate(project, field="actualDate"){
 
 
 
+const DETAIL_ENGG_TEAM_LABEL = "Detail Engg. Team";
+const PROJECT_TEAM_LABEL = "Project Team";
+
+function normalizeTechnicalTaskName(value){
+  const raw = String(value || "").trim();
+  if(!raw) return "";
+  const key = raw.toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Consolidate spelling/wording variants such as Detail Eng, Details Engg,
+  // Detail Enginerring and Detail Engineering Team into one standard label.
+  if(/^(detail|details|detailed)\s+eng/.test(key)) return DETAIL_ENGG_TEAM_LABEL;
+
+  // Club Project, Projects Team and Project Team under one Technical Team label.
+  // This changes only the team label; the task name and task data remain untouched.
+  if(/^(technical\s+team\s+)?projects?(\s+team)?$/.test(key)) return PROJECT_TEAM_LABEL;
+  return raw;
+}
+
 const TECHNICAL_TASK_ASSIGNMENTS = {
   "handover from sales and contracts to projects": "Process Team",
   "approved costing sheet": "Process Team",
@@ -1074,56 +1147,56 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
   "tds preparation after cost comparison of various makes": "Process Team",
   "tds preparation after cost comparison of various make": "Process Team",
   "p and id": "Process Team",
-  "plan and section": "Detail Eng Team",
+  "plan and section": "Detail Engg. Team",
   "client approval": "Process Team",
   "control philosophy": "Process Team",
   "indent 1": "Process Team",
-  "gfc and structural design fabrication drawing": "Details Eng Team",
+  "gfc and structural design fabrication drawing": "Detail Engg. Team",
   "client scope finalisation with quality control": "Process Team",
   "ga and sld with load list": "Electrical Team",
   "client approval panel foundation": "Process Team",
   "panel foundation": "Electrical Team",
-  "piping layout": "Detail Eng Team",
+  "piping layout": "Detail Engg. Team",
   "cable tray layout": "Electrical Team",
-  "indents 2 4 5 and 3": "Detail Engg.",
-  "indents 245 and 3": "Detail Engg.",
-  "indents 2 4 5 3": "Detail Engg.",
-  "indents 2 4 5 3a b": "Detail Engg.",
+  "indents 2 4 5 and 3": "Detail Engg. Team",
+  "indents 245 and 3": "Detail Engg. Team",
+  "indents 2 4 5 3": "Detail Engg. Team",
+  "indents 2 4 5 3a b": "Detail Engg. Team",
   "automation logic": "Electrical Team",
   "note for transition team": "Process Team",
-  "critical points and quality control measures drawings and material": "Detail Engineering Team",
-  "critical points and quality control measures for drawings and material": "Detail Engineering Team",
-  "micro billing schedule with short increase decrease of qty extra item possibility": "Detail Engineering Team",
-  "micro billing schedule with short increase and decrease of qty extra item possibility": "Detail Engineering Team",
+  "critical points and quality control measures drawings and material": "Detail Engg. Team",
+  "critical points and quality control measures for drawings and material": "Detail Engg. Team",
+  "micro billing schedule with short increase decrease of qty extra item possibility": "Detail Engg. Team",
+  "micro billing schedule with short increase and decrease of qty extra item possibility": "Detail Engg. Team",
   "final tds inputs": "Process Team",
-  "site mobilization file to be handed over to projects close loop with transition team too": "Detail Eng Team",
-  "quality control of client work review": "Detail Eng Team",
-  "over see how material is packed and dispatch": "Detail Eng Team",
-  "oversee material packing and dispatch": "Detail Eng Team",
-  "quality control": "Detail Eng Team",
-  "check the qualification of site team critical inputs should be provided": "Detail Eng Team",
-  "check site team qualification and provide critical inputs": "Detail Eng Team",
-  "panel foundation need to check": "Detail Eng Team",
-  "check panel foundation": "Detail Eng Team",
+  "site mobilization file to be handed over to projects close loop with transition team too": "Detail Engg. Team",
+  "quality control of client work review": "Detail Engg. Team",
+  "over see how material is packed and dispatch": "Detail Engg. Team",
+  "oversee material packing and dispatch": "Detail Engg. Team",
+  "quality control": "Detail Engg. Team",
+  "check the qualification of site team critical inputs should be provided": "Detail Engg. Team",
+  "check site team qualification and provide critical inputs": "Detail Engg. Team",
+  "panel foundation need to check": "Detail Engg. Team",
+  "check panel foundation": "Detail Engg. Team",
   "any deviation with tds related to e and i": "Electrical Team",
   "check any deviation with tds related to e and i": "Electrical Team",
-  "execution go ahead": "Detail Eng Team",
-  "site visit": "Detail Eng Team",
-  "check indent 6 and approve": "Detail Eng Team",
-  "contractor demobilisation should be strictly after virtual completion certification": "Details Eng Team",
-  "contractor demobilisation only after virtual completion certification": "Details Eng Team",
+  "execution go ahead": "Detail Engg. Team",
+  "site visit": "Detail Engg. Team",
+  "check indent 6 and approve": "Detail Engg. Team",
+  "contractor demobilisation should be strictly after virtual completion certification": "Detail Engg. Team",
+  "contractor demobilisation only after virtual completion certification": "Detail Engg. Team",
   "completion certification from the transition team": "Project Team",
-  "checking of mechanical work": "Detail Eng Team",
-  "checking of mechanical work electrical progress and panel as per approved tds": "Detail Eng Team",
+  "checking of mechanical work": "Detail Engg. Team",
+  "checking of mechanical work electrical progress and panel as per approved tds": "Detail Engg. Team",
   "measuring of electrical progress": "Electrical Team",
   "panel started as per approved tds": "Electrical Team",
-  "indent 7 8": "Detail Eng Team",
+  "indent 7 8": "Detail Engg. Team",
   "checklist approval dry wet run": "Process Team",
   "electrical checklist continuity rotation ampere": "Electrical Team",
   "indent 7 8 checklist approval dry wet run electrical checklist": "Process Team",
-  "final shade of piping paint tank filter": "Detail Eng Team",
-  "paint dft should be mentioned in document": "Detail Eng Team",
-  "as built submission and pfd dashboard provided to site team": "Detail Eng Team",
+  "final shade of piping paint tank filter": "Detail Engg. Team",
+  "paint dft should be mentioned in document": "Detail Engg. Team",
+  "as built submission and pfd dashboard provided to site team": "Detail Engg. Team",
   "monitor new technology equipment performance and involve services post de snagging": "Process Team",
   "for new technology or new equipment performance shall be closely monitored and feedback shall be obtained from the operations team site visits may be conducted if required": "Process Team",
   "full involvement of services post de snagging": "Process Team",
@@ -1131,9 +1204,9 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
   "submittals approval": "Process Team",
   "site visit if required": "Process Team",
   "technical review agenda": "Process Team",
-  "detailed engineering review": "Detail Eng Team",
-  "drawings submittals approval": "Detail Eng Team",
-  "critical points related to installation": "Detail Eng Team",
+  "detailed engineering review": "Detail Engg. Team",
+  "drawings submittals approval": "Detail Engg. Team",
+  "critical points related to installation": "Detail Engg. Team",
   "initial note with costing for internal approval": "Electrical Team",
   "indent 3a preparation": "Electrical Team",
   "electrical submittal approval": "Electrical Team",
@@ -1146,15 +1219,20 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
 };
 
 function applyMinorTaskUpdates(){
+  let changed=0;
   (db.projects || []).forEach(p => {
     (p.tasks || []).forEach(t => {
       if(!t || t.dept !== "Technical Team") return;
       const key = canonicalTaskText(t.task);
-      if(TECHNICAL_TASK_ASSIGNMENTS[key]){
-        t.technicalTask = TECHNICAL_TASK_ASSIGNMENTS[key];
+      const assignedTeam = TECHNICAL_TASK_ASSIGNMENTS[key];
+      const normalizedTeam = normalizeTechnicalTaskName(assignedTeam || t.technicalTask);
+      if(t.technicalTask !== normalizedTeam){
+        t.technicalTask = normalizedTeam;
+        changed++;
       }
     });
   });
+  return changed;
 }
 
 let workflowSyncRunning = false;
@@ -1179,6 +1257,7 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
     lastUpdated: new Date().toLocaleString(),
     history: []
   };
+  if(task.dept === "Technical Team") task.technicalTask = normalizeTechnicalTaskName(task.technicalTask);
   addHistory(task, "Created", sourceText + (task.owner ? " and auto-assigned to " + task.owner : ""));
   return task;
 }
@@ -1291,20 +1370,22 @@ function readLocalDatabase(){
   if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
   if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
+  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
+  const technicalLabelsUpdated=applyMinorTaskUpdates();
   resetRuntimeCaches();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
-  return migrated;
+  return migrated || technicalLabelsUpdated>0;
 }
 
 function applyRemoteDatabase(remoteData){
   db=remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
+  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
+  const technicalLabelsUpdated=applyMinorTaskUpdates();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
-  return migrated;
+  return migrated || technicalLabelsUpdated>0;
 }
 
 function load(){
@@ -1400,15 +1481,17 @@ function initAuthState(){
 function renderAll(){
   updateUserProfileBox();
   const view=getActiveViewName();
-  if(view==='project') renderProject();
+  if(view==='team') renderTeamDashboard();
+  else if(view==='project') renderProject();
   else if(view==='mis'){ renderMIS(); renderMISDashboard(); }
   else if(view==='dashboard') renderDashboard();
 }
 function showDashboard(){ setTab('dashboardTab'); hideAll(); document.getElementById('dashboardView').classList.remove('hidden'); renderDashboard(); }
+function showTeamDashboard(){ setTab('teamDashboardTab'); hideAll(); document.getElementById('teamDashboardView').classList.remove('hidden'); renderTeamDashboard(); }
 function showProjectView(){ setTab('projectTab'); hideAll(); document.getElementById('projectView').classList.remove('hidden'); renderProject(); }
 function showMIS(){ setTab('misTab'); hideAll(); document.getElementById('misView').classList.remove('hidden'); renderMIS(); renderMISDashboard(); }
 function showSetup(){ setTab(""); hideAll(); document.getElementById("setupView").classList.remove("hidden"); }
-function hideAll(){ ["dashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
+function hideAll(){ ["dashboardView","teamDashboardView","projectView","misView","setupView"].forEach(id=>document.getElementById(id).classList.add("hidden")); }
 function setTab(id){ document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active")); if(id) document.getElementById(id).classList.add("active"); }
 function daysFromToday(dateStr){
   const d = parseDateFlexible(dateStr);
@@ -1497,6 +1580,185 @@ function renderDashboard(){
   }).join('')||'<div class="card">No projects added yet. Click <b>Add Project</b>.</div>';
 }
 
+function atLocalMidnight(date){
+  return new Date(date.getFullYear(),date.getMonth(),date.getDate());
+}
+function addCalendarDays(date,days){
+  const d=atLocalMidnight(date); d.setDate(d.getDate()+days); return d;
+}
+function teamDateWindows(){
+  const current=atLocalMidnight(parseDateFlexible(today())||new Date());
+  const mondayOffset=(current.getDay()+6)%7;
+  const weekStart=addCalendarDays(current,-mondayOffset);
+  const weekEnd=addCalendarDays(weekStart,6);
+  const nextWeekStart=addCalendarDays(weekStart,7);
+  const nextWeekEnd=addCalendarDays(weekStart,13);
+  const monthEnd=new Date(current.getFullYear(),current.getMonth()+1,0);
+  const nextMonthStart=new Date(current.getFullYear(),current.getMonth()+1,1);
+  const nextMonthEnd=new Date(current.getFullYear(),current.getMonth()+2,0);
+  return {current,weekStart,weekEnd,nextWeekStart,nextWeekEnd,monthEnd,nextMonthStart,nextMonthEnd};
+}
+function dateFallsBetween(date,start,end){
+  if(!date) return false;
+  const value=atLocalMidnight(date).getTime();
+  return value>=atLocalMidnight(start).getTime() && value<=atLocalMidnight(end).getTime();
+}
+function getTeamTaskPeriod(record){
+  if(!record.due) return {key:'noDate',label:'No Planned Date',css:'period-no-date'};
+  if(record.isOverdue) return {key:'overdue',label:'Overdue',css:'period-overdue'};
+  if(record.isThisWeek) return {key:'thisWeek',label:'This Week',css:'period-this-week'};
+  if(record.isNextWeek) return {key:'nextWeek',label:'Next Week',css:'period-next-week'};
+  if(record.isThisMonth) return {key:'thisMonth',label:'This Month',css:'period-this-month'};
+  if(record.isNextMonth) return {key:'nextMonth',label:'Next Month',css:'period-next-month'};
+  return {key:'future',label:'Future',css:'period-no-date'};
+}
+function buildTeamTaskRecords(){
+  const windows=teamDateWindows();
+  const records=[];
+  (db.projects||[]).forEach(project=>{
+    (project.tasks||[]).forEach(task=>{
+      if(isDoneStatus(task.status)) return;
+      const dueDate=normalizeDateForInput(stageDateForTask(project,task,'initialPlanningDate'))||'';
+      const due=parseDateFlexible(dueDate);
+      const record={
+        project,task,dueDate,due,
+        team:departmentLabel(task)||task.dept||'Unassigned Team',
+        isOverdue:!!due && atLocalMidnight(due)<windows.current,
+        isThisWeek:!!due && dateFallsBetween(due,windows.current,windows.weekEnd),
+        isNextWeek:!!due && dateFallsBetween(due,windows.nextWeekStart,windows.nextWeekEnd),
+        isThisMonth:!!due && dateFallsBetween(due,windows.current,windows.monthEnd),
+        isNextMonth:!!due && dateFallsBetween(due,windows.nextMonthStart,windows.nextMonthEnd)
+      };
+      record.period=getTeamTaskPeriod(record);
+      records.push(record);
+    });
+  });
+  return records;
+}
+function refreshTeamDashboardSelects(records){
+  const teamSelect=document.getElementById('teamDashboardTeam');
+  const projectSelect=document.getElementById('teamDashboardProject');
+  if(teamSelect){
+    const selected=teamSelect.value;
+    const teams=[...new Set(records.map(record=>record.team).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const key=teams.join('|');
+    if(teamSelect.dataset.optionsKey!==key){
+      teamSelect.innerHTML='<option value="">All Teams</option>'+teams.map(team=>`<option value="${escAttr(team)}">${esc(team)}</option>`).join('');
+      teamSelect.dataset.optionsKey=key;
+      teamSelect.value=teams.includes(selected)?selected:'';
+    }
+  }
+  if(projectSelect){
+    const selected=projectSelect.value;
+    const projects=(db.projects||[]).map(project=>({id:project.id,label:`${project.name||'Untitled Project'}${project.jobCode?' · '+project.jobCode:''}`})).sort((a,b)=>a.label.localeCompare(b.label));
+    const key=projects.map(project=>project.id+':'+project.label).join('|');
+    if(projectSelect.dataset.optionsKey!==key){
+      projectSelect.innerHTML='<option value="">All Projects</option>'+projects.map(project=>`<option value="${escAttr(project.id)}">${esc(project.label)}</option>`).join('');
+      projectSelect.dataset.optionsKey=key;
+      projectSelect.value=projects.some(project=>project.id===selected)?selected:'';
+    }
+  }
+}
+function filterTeamTaskRecords(records,includeBucket=true){
+  const team=document.getElementById('teamDashboardTeam')?.value||'';
+  const projectId=document.getElementById('teamDashboardProject')?.value||'';
+  const owner=(document.getElementById('teamDashboardOwner')?.value||'').trim().toLowerCase();
+  const status=document.getElementById('teamDashboardStatus')?.value||'';
+  const bucket=document.getElementById('teamDashboardBucket')?.value||'all';
+  const search=(document.getElementById('teamDashboardSearch')?.value||'').trim().toLowerCase();
+  return records.filter(record=>{
+    const task=record.task,project=record.project;
+    if(team && record.team!==team) return false;
+    if(projectId && project.id!==projectId) return false;
+    if(owner && !String(task.owner||'').toLowerCase().includes(owner)) return false;
+    if(status && task.status!==status) return false;
+    if(search){
+      const blob=[project.name,project.jobCode,project.client,project.location,project.manager,record.team,task.stage,task.sub,task.task,task.owner,task.status].join(' ').toLowerCase();
+      if(!blob.includes(search)) return false;
+    }
+    if(!includeBucket || bucket==='all') return true;
+    if(bucket==='overdue') return record.isOverdue;
+    if(bucket==='thisWeek') return record.isThisWeek;
+    if(bucket==='nextWeek') return record.isNextWeek;
+    if(bucket==='thisMonth') return record.isThisMonth;
+    if(bucket==='nextMonth') return record.isNextMonth;
+    if(bucket==='noDate') return !record.due;
+    return true;
+  });
+}
+function teamTaskTimingText(record){
+  if(!record.due) return 'Date not planned';
+  const days=daysFromToday(record.dueDate);
+  if(days===0) return 'Due today';
+  if(days<0) return `${Math.abs(days)} day${Math.abs(days)===1?'':'s'} overdue`;
+  return `Due in ${days} day${days===1?'':'s'}`;
+}
+function setTeamDashboardBucket(bucket){
+  const select=document.getElementById('teamDashboardBucket');
+  if(select) select.value=bucket;
+  renderTeamDashboard();
+}
+function renderTeamDashboard(){
+  const table=document.getElementById('teamTaskTable'); if(!table) return;
+  const records=buildTeamTaskRecords();
+  refreshTeamDashboardSelects(records);
+  const base=filterTeamTaskRecords(records,false);
+  const filtered=filterTeamTaskRecords(records,true).sort((a,b)=>{
+    const dateCompare=(a.dueDate||'9999-12-31').localeCompare(b.dueDate||'9999-12-31');
+    if(dateCompare) return dateCompare;
+    const projectCompare=String(a.project.name||'').localeCompare(String(b.project.name||''));
+    if(projectCompare) return projectCompare;
+    return String(a.task.task||'').localeCompare(String(b.task.task||''));
+  });
+
+  setText('teamKpiThisWeek',base.filter(record=>record.isThisWeek).length);
+  setText('teamKpiNextWeek',base.filter(record=>record.isNextWeek).length);
+  setText('teamKpiThisMonth',base.filter(record=>record.isThisMonth).length);
+  setText('teamKpiNextMonth',base.filter(record=>record.isNextMonth).length);
+  setText('teamKpiPending',base.length);
+  setText('teamKpiOverdue',base.filter(record=>record.isOverdue).length);
+  setText('teamDashboardCount',`Showing ${filtered.length} of ${base.length} pending task${base.length===1?'':'s'}`);
+
+  const activeBucket=document.getElementById('teamDashboardBucket')?.value||'all';
+  document.querySelectorAll('.team-kpi').forEach(card=>card.classList.toggle('active',card.dataset.teamBucket===activeBucket));
+
+  let html='<tr><th>Project</th><th>Job Code</th><th>Team / Sub-team</th><th>Stage</th><th>Sub-stage</th><th>Task</th><th>Owner</th><th>Status</th><th>Planned Due Date</th><th>Due Period</th><th>Timing</th><th>Project Target</th><th>Action</th></tr>';
+  html+=filtered.map(record=>{
+    const project=record.project,task=record.task;
+    return `<tr><td><b>${esc(project.name||'Untitled Project')}</b><br><span class="muted">${esc(project.client||'')}</span></td><td>${esc(project.jobCode||'-')}</td><td>${esc(record.team)}</td><td>${esc(task.stage||'-')}</td><td>${esc(task.sub||'-')}</td><td>${esc(task.task||'-')}</td><td>${esc(task.owner||'-')}</td><td>${badge(task.status||'To Do')}</td><td>${esc(formatDateDisplay(record.dueDate)||'-')}</td><td><span class="pill ${record.period.css}">${esc(record.period.label)}</span></td><td>${esc(teamTaskTimingText(record))}</td><td>${esc(formatDateDisplay(project.targetDate)||'-')}</td><td><button class="small primary" onclick="openTeamTaskInProject('${project.id}','${task.id}')">Open Tracker</button></td></tr>`;
+  }).join('');
+  if(!filtered.length) html+='<tr><td colspan="13" class="muted">No pending tasks match the selected team, project, owner, status and due-period filters.</td></tr>';
+  table.innerHTML=html;
+}
+function openTeamTaskInProject(projectId,taskId){
+  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return;
+  const task=(project.tasks||[]).find(item=>item.id===taskId);
+  currentProjectId=projectId;
+  showProjectView();
+  if(task){
+    const textFilter=document.getElementById('filterText');
+    const statusFilter=document.getElementById('filterStatus');
+    const departmentFilter=document.getElementById('filterDept');
+    if(textFilter) textFilter.value=task.task||'';
+    if(statusFilter) statusFilter.value='';
+    if(departmentFilter){
+      const label=departmentLabel(task);
+      departmentFilter.value=[...departmentFilter.options].some(option=>option.value===label)?label:'';
+    }
+    renderProject();
+    document.getElementById('taskTableScroll')?.scrollIntoView({behavior:'smooth',block:'start'});
+  }
+}
+function exportTeamDashboardCSV(){
+  const records=filterTeamTaskRecords(buildTeamTaskRecords(),true);
+  if(!records.length){ alert('No team dashboard tasks match the current filters.'); return; }
+  const rows=[["Project","Job Code","Client","Team / Sub-team","Stage","Sub-stage","Task","Owner","Status","Stage Planned Due Date","Due Period","Timing","Project Target Date","Project Status"]];
+  records.forEach(record=>rows.push([
+    record.project.name,record.project.jobCode,record.project.client,record.team,record.task.stage,record.task.sub,record.task.task,record.task.owner,record.task.status,record.dueDate,record.period.label,teamTaskTimingText(record),record.project.targetDate,record.project.overallStatus
+  ]));
+  downloadFile('team-wise-pending-task-dashboard.csv',csv(rows),'text/csv');
+}
+
 function setText(id,val){ const el=document.getElementById(id); if(el) el.textContent=val; }
 
 function renderActivityFeed(){
@@ -1578,7 +1840,7 @@ function renderNotificationDashboard(){
       else if(daysFromToday(rec.initialPlanningDate)<0) notifications.push({level:'Stage Escalation Required',project,task:{task:`${group.stage} / ${group.sub}`,dept:'Stage Date',owner:'-'}});
     });
   });
-  el.innerHTML=notifications.slice(0,12).map(item=>`<div class="alert-item ${item.level==='Stage Escalation Required'?'overdue':''}"><b>${esc(item.level)}</b>: ${esc(item.task.task)}<div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)} · Owner: ${esc(item.task.owner||'-')}</div></div>`).join('')||'<p class="muted">No system notifications.</p>';
+  el.innerHTML=notifications.slice(0,12).map(item=>`<div class="alert-item ${item.level==='Stage Escalation Required'?'overdue':''}"><b>${esc(item.level)}</b>: ${esc(item.task.task)}<div class="muted">${esc(item.project.name||'Project')} · ${esc(departmentLabel(item.task))} · Owner: ${esc(item.task.owner||'-')}</div></div>`).join('')||'<p class="muted">No system notifications.</p>';
 }
 
 function renderMyTasksDashboard(owner){
@@ -1590,14 +1852,14 @@ function renderMyTasksDashboard(owner){
   el.innerHTML=matches.slice(0,12).map(item=>{
     const date=item.date==='9999-12-31'?'':item.date; const days=date?daysFromToday(date):null;
     const label=days===null?item.task.status:(days<0?'Stage Overdue':days===0?'Stage Due Today':days<=7?'Stage Due This Week':item.task.status);
-    return `<div class="mini-row"><div><b>${esc(item.task.task)}</b><div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)}</div><span class="pill">${esc(label)}</span></div><span>${esc(formatDateDisplay(date)||'-')}</span></div>`;
+    return `<div class="mini-row"><div><b>${esc(item.task.task)}</b><div class="muted">${esc(item.project.name||'Project')} · ${esc(departmentLabel(item.task))}</div><span class="pill">${esc(label)}</span></div><span>${esc(formatDateDisplay(date)||'-')}</span></div>`;
   }).join('')||'<p class="muted">No pending tasks found for this owner.</p>';
 }
 
 function openProject(id){ currentProjectId=id; showProjectView(); }
 
 function getTechnicalDepartment(technicalTask){
-  const value = String(technicalTask || "").trim();
+  const value = normalizeTechnicalTaskName(technicalTask);
   return value ? `Technical Team - ${value}` : "Technical Team";
 }
 function departmentLabel(t){
@@ -1644,20 +1906,17 @@ function renderProject(){
     return;
   }
   cards.innerHTML='';
-  let bodyHtml='';
-  const headerHtml='<thead><tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr></thead>';
+  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>';
   let lastStage='',lastSub='';
   visible.forEach(task=>{
-    if(task.stage!==lastStage){ bodyHtml+=`<tr class="stage-row"><td colspan="23">${esc(task.stage)}</td></tr>`; lastStage=task.stage; lastSub=''; }
-    if(task.sub!==lastSub){ bodyHtml+=`<tr class="substage-row"><td colspan="23">${esc(task.sub)}</td></tr>`; lastSub=task.sub; }
+    if(task.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="23">${esc(task.stage)}</td></tr>`; lastStage=task.stage; lastSub=''; }
+    if(task.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="23">${esc(task.sub)}</td></tr>`; lastSub=task.sub; }
     const editable=canEditTask(task),ownerEditable=canEditProject();
     const input=(field,value)=>`<input class="inline-input" value="${escAttr(value||'')}" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','${field}',this.value)">`;
-    bodyHtml+=`<tr><td>${esc(task.stage)}</td><td>${esc(task.sub)}</td><td>${esc(departmentLabel(task))}</td><td>${esc(task.task)}</td><td>${input('planning',task.planning)}</td><td>${input('visitorPerson',task.visitorPerson)}</td><td>${input('siteReport',task.siteReport)}</td><td>${input('checkPoints',task.checkPoints)}</td><td>${input('checkingPerson',task.checkingPerson)}</td><td>${input('qualityCheckReport',task.qualityCheckReport)}</td><td>${input('monthlyCorrespondence',task.monthlyCorrespondence)}</td><td>${input('budget',task.budget)}</td><td>${input('expensesIncurred',task.expensesIncurred)}</td><td>${input('plannedBilling',task.plannedBilling)}</td><td>${input('actualBilling',task.actualBilling)}</td><td>${input('collection',task.collection)}</td><td><input class="inline-input" value="${escAttr(task.owner||'')}" ${ownerEditable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"></td><td><select class="inline-select" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','remarks',this.value)">${esc(task.remarks||'')}</textarea></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','delayReason',this.value)">${esc(task.delayReason||'')}</textarea></td><td>${esc(task.lastUpdated||'')}</td><td><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button></td><td><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${task.id}')">Delete</button></td></tr>`;
+    html+=`<tr><td>${esc(task.stage)}</td><td>${esc(task.sub)}</td><td>${esc(departmentLabel(task))}</td><td>${esc(task.task)}</td><td>${input('planning',task.planning)}</td><td>${input('visitorPerson',task.visitorPerson)}</td><td>${input('siteReport',task.siteReport)}</td><td>${input('checkPoints',task.checkPoints)}</td><td>${input('checkingPerson',task.checkingPerson)}</td><td>${input('qualityCheckReport',task.qualityCheckReport)}</td><td>${input('monthlyCorrespondence',task.monthlyCorrespondence)}</td><td>${input('budget',task.budget)}</td><td>${input('expensesIncurred',task.expensesIncurred)}</td><td>${input('plannedBilling',task.plannedBilling)}</td><td>${input('actualBilling',task.actualBilling)}</td><td>${input('collection',task.collection)}</td><td><input class="inline-input" value="${escAttr(task.owner||'')}" ${ownerEditable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"></td><td><select class="inline-select" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','remarks',this.value)">${esc(task.remarks||'')}</textarea></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','delayReason',this.value)">${esc(task.delayReason||'')}</textarea></td><td>${esc(task.lastUpdated||'')}</td><td><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button></td><td><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${task.id}')">Delete</button></td></tr>`;
   });
-  if(!bodyHtml) bodyHtml='<tr><td colspan="23" class="muted">No tasks match the selected filters.</td></tr>';
-  table.innerHTML=headerHtml+'<tbody>'+bodyHtml+'</tbody>';
+  table.innerHTML=html;
 }
-
 function badge(st){ const c=st==="Done"?"done":st==="In Progress"?"progress":"todo"; return `<span class="status ${c}">${esc(st||"To Do")}</span>`; }
 function openProjectForm(id){
   if(!requirePermission(canEditProject(), "Only Admin/PM can add or edit project details.")) return;
@@ -1719,9 +1978,13 @@ function openTaskForm(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=taskId?p.tasks.find(x=>x.id===taskId):{status:"To Do"};
   if(taskId && !requirePermission(canFullEditTask(t), "Only Admin/PM can fully edit task details.")) return;
   if(!taskId && !requirePermission(canEditProject(), "Only Admin/PM can add new tasks.")) return;
+  const technicalValue=normalizeTechnicalTaskName(t.technicalTask);
+  const technicalOptions=[...TECHNICAL_TEAMS];
+  if(technicalValue && !technicalOptions.includes(technicalValue)) technicalOptions.push(technicalValue);
   document.getElementById("modalTitle").textContent=taskId?"Edit Task":"Add Task";
   document.getElementById("modalBody").innerHTML=`<div class="grid grid-3">
-    ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)} ${field("Technical Task","technicalTask",t.technicalTask)} 
+    ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)}
+    <div><label>Technical Task</label><select id="f_technicalTask"><option value="">Select Technical Team</option>${technicalOptions.map(team=>`<option value="${escAttr(team)}" ${technicalValue===team?"selected":""}>${esc(team)}</option>`).join("")}</select></div>
     <div><label>Department</label><select id="f_dept">${DEPARTMENTS.map(d=>`<option ${t.dept===d?"selected":""}>${d}</option>`).join("")}</select></div>
     <div style="grid-column:1/-1"><label>Task</label><textarea id="f_task">${esc(t.task||"")}</textarea></div>
     ${field("Owner","owner",t.owner)}
@@ -1895,7 +2158,7 @@ function getMISRows(){
         client:p.client||"",
         stage:t.stage||"",
         sub:t.sub||"",
-        department:t.dept||"",
+        department:departmentLabel(t)||"",
         task:t.task||"",
         owner:t.owner||"",
         taskStatus:t.status||"",
@@ -1920,7 +2183,7 @@ function renderMIS(){
   const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
   const dept=document.getElementById("misDeptFilter")?.value||"";
   const st=document.getElementById("misStatusFilter")?.value||"";
-  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
+  let rows=getMISRows().filter(r=>(!dept||r.department===dept||(dept==='Technical Team'&&r.department.startsWith('Technical Team - ')))&&(!st||r.taskStatus===st));
   if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
   setText("misRowsCount", rows.length);
   setText("misMomPending", rows.filter(r=>r.siteMom==="Pending").length);
@@ -1941,12 +2204,12 @@ function renderMIS(){
 
 function exportProjectCSV(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
-  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
+  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),departmentLabel(t),t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
   downloadFile(`${p.name||"project"}-tracker.csv`, csv(rows), "text/csv");
 }
 function exportAllCSV(){
   const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
-  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
+  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),departmentLabel(t),t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
   downloadFile("all-projects-tracker.csv", csv(rows), "text/csv");
 }
 function testFirebaseWrite(){
@@ -2725,6 +2988,7 @@ function updateTaskField(projectId,taskId,field,value){
   if(!project||!task) return;
   if(!canEditTask(task)){ alert('You can only update tasks assigned to you.'); scheduleActiveRender('project'); return; }
   if(field==='owner'&&!canEditProject()){ alert('Only Admin/PM can change owner.'); scheduleActiveRender('project'); return; }
+  if(field==='technicalTask') value=normalizeTechnicalTaskName(value);
   const oldValue=task[field]||''; if(String(oldValue)===String(value)) return;
   const oldStage=task.stage,oldSub=task.sub; const structural=field==='stage'||field==='sub';
   if(field==='status'&&isDoneStatus(oldValue)&&!isDoneStatus(value)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)){ scheduleActiveRender('project'); return; }
@@ -2749,8 +3013,9 @@ function updateTaskField(projectId,taskId,field,value){
 function collectTaskFormData(){
   const taskName=document.getElementById('f_task')?.value.trim()||'';
   const stage=v('stage'), sub=v('sub');
+  const dept=document.getElementById('f_dept')?.value||'';
   if(!stage||!sub||!taskName){ alert('Stage, Sub-stage and Task are required.'); return null; }
-  return {stage,sub,technicalTask:v('technicalTask'),dept:document.getElementById('f_dept')?.value||'',task:taskName,owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status')?.value||'To Do',remarks:document.getElementById('f_remarks')?.value.trim()||'',delayReason:document.getElementById('f_delayReason')?.value.trim()||'',lastUpdated:new Date().toISOString()};
+  return {stage,sub,technicalTask:dept==='Technical Team'?normalizeTechnicalTaskName(v('technicalTask')):'',dept,task:taskName,owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status')?.value||'To Do',remarks:document.getElementById('f_remarks')?.value.trim()||'',delayReason:document.getElementById('f_delayReason')?.value.trim()||'',lastUpdated:new Date().toISOString()};
 }
 
 function saveTask(id){
