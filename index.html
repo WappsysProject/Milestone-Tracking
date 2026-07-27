@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
-  <title>Project Tracking Dashboard V20</title>
+  <title>Project Tracking Dashboard V21</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -109,6 +109,25 @@
 
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
+
+    /* Detailed Task Tracker: all tasks stay in one view and the column heading remains frozen. */
+    .task-table-scroll{
+      max-height:72vh;
+      overflow:auto;
+      position:relative;
+      scrollbar-gutter:stable;
+    }
+    .task-table-scroll #taskTable th{
+      position:sticky;
+      top:0;
+      z-index:12;
+      background:#eaf2f8;
+      box-shadow:0 2px 5px rgba(15,23,42,.16);
+    }
+    @media(max-width:760px){
+      .task-table-scroll{max-height:none;overflow:visible;border:0}
+    }
+
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
 
     /* Render every task row normally so no rows are clipped or skipped. */
@@ -265,7 +284,7 @@
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
         </div>
-        <div class="table-scroll" style="overflow:auto;margin-top:12px">
+        <div class="table-scroll task-table-scroll" style="margin-top:12px">
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
@@ -346,7 +365,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V20 | All matching tasks visible with no row limits</div>
+<div class="footer">Project Tracker V21 | All matching tasks visible with no row limits</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
