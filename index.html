@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
-  <title>Project Tracking Dashboard V20</title>
+  <title>Project Tracking Dashboard V21</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -109,6 +109,38 @@
 
     .table-scroll{overflow:auto;max-width:100%;border:1px solid var(--border);border-radius:10px}
     .table-scroll table{min-width:1200px}
+
+    /* Detailed Task Tracker: one continuous task list with a reliably frozen column heading. */
+    .task-table-scroll{
+      height:72vh;
+      max-height:72vh;
+      overflow:auto;
+      position:relative;
+      isolation:isolate;
+      scrollbar-gutter:stable both-edges;
+      overscroll-behavior:contain;
+    }
+    .task-table-scroll #taskTable{
+      border-collapse:separate;
+      border-spacing:0;
+    }
+    .task-table-scroll #taskTable thead{
+      position:sticky;
+      top:0;
+      z-index:30;
+    }
+    .task-table-scroll #taskTable thead th{
+      position:sticky;
+      top:0;
+      z-index:31;
+      background:#eaf2f8;
+      box-shadow:0 2px 5px rgba(15,23,42,.20);
+      background-clip:padding-box;
+    }
+    @media(max-width:760px){
+      .task-table-scroll{height:auto;max-height:none;overflow:visible;border:0}
+    }
+
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
 
     /* Render every task row normally so no rows are clipped or skipped. */
@@ -265,7 +297,7 @@
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
         </div>
-        <div class="table-scroll" style="overflow:auto;margin-top:12px">
+        <div class="table-scroll task-table-scroll" style="margin-top:12px">
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
@@ -346,7 +378,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V20 | All matching tasks visible with no row limits</div>
+<div class="footer">Project Tracker V22 | All matching tasks visible with no row limits</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -359,7 +391,6 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
 <script>
 const STATUS = ["To Do","In Progress","Done"];
 const DEPARTMENTS = ["Contracts & Commercial","Technical Team","Purchase Team","Projects Team","Transition Team","Billing"];
-const TECHNICAL_TEAMS = ["Process Team","Detail Engg. Team","Electrical Team","Project Team"];
 let db = { projects: [] };
 let currentProjectId = null;
 let currentUser = "Unknown User";
@@ -708,27 +739,27 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Design Calculations", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"TDS Preparation after cost comparison of various make", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"P&ID", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Control Philosophy", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 1", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Details Eng Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client scope finalisation with Quality control", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GA & SLD with Load List", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval - Panel Foundation", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Panel Foundation", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Cable Tray Layout", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg."},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Automation Logic", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Note for Transition Team", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engineering Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Submittals / Approval", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Site Visit if Required", technicalTask:"Process Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Technical Review Agenda", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Initial Note with Costing for Internal Approval", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3A Preparation", technicalTask:"Electrical Team"},
   {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Electrical Submittal / Approval", technicalTask:"Electrical Team"},
@@ -752,7 +783,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Billing Plan Review"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Micro Billing Plan"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Understand RA bill formats and billing procedure"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engineering Team"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement plan, logistics plan and ordering long delivery items"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Final Closure"},
   {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement Plan"},
@@ -760,8 +791,8 @@ const WORKFLOW_TEMPLATE = [
 
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Contracts & Commercial", task:"Oversee site mobilisation preparation and ensure client cashflow is available"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Final TDS / Inputs", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation"},
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Site mobilization file checking and training to site person"},
@@ -769,16 +800,16 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Billing", task:"Document Submission (BG, ABG, PBG, RBG, CAR, WC)"},
 
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Contracts & Commercial", task:"Check E-way bill, RA bill and related documents as per site requirement"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Engg. Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Eng Team"},
+  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Eng Team"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"TCs, challans, vendor coordination and material dispatch tracking"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"Logistic / Dispatch Plan"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"QC / Test Certificates"},
   {stage:"Planning Stage", sub:"Material Dispatch", dept:"Projects Team", task:"Verify site mobilisation file, budget, MIR documents, material receipt and security"},
 
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Contracts & Commercial", task:"Review site expense budget and closure plan"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Eng Team"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Any deviation with TDS related to E&I", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Purchase Team", task:"Review pending material/order and logistics with projects"},
   {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Final check of client work, status and snags"},
@@ -791,7 +822,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget and schedule control"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Client feedback"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing and collection"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Eng Team"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Purchase Team", task:"Share vendor visit details and supply material for indents"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Execution start"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Set quality control procedures and welding list"},
@@ -800,18 +831,18 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Escalation if any"},
   {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Billing", task:"Collection"},
 
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Eng Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Eng Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit / Quality Check", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Details Eng Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Completion certification from the transition team", technicalTask:"Project Team"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Vendor visit list and coordination"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Supply material of indent 6"},
   {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Projects Team", task:"De-snagging, transition team visit, indent 7/8, optional QC visit and demobilisation control"},
 
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Contracts & Commercial", task:"Electrical budget if any deviation"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Engg. Team"},
+  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Eng Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Measuring of electrical progress", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Panel Started as per approved TDS", technicalTask:"Electrical Team"},
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"PLC Programming & Automation Testing", technicalTask:"Electrical Team"},
@@ -819,7 +850,7 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Projects Team", task:"De-snagging of mechanical work"},
 
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Engg. Team"},
+  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Eng Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Checklist Approval (Dry/Wet Run)", technicalTask:"Process Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Electrical checklist (Continuity, rotation, Ampere)", technicalTask:"Electrical Team"},
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Sites - Dry Run / Wet Run Go-Ahead", technicalTask:"Electrical Team"},
@@ -830,9 +861,9 @@ const WORKFLOW_TEMPLATE = [
   {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Transition Team", task:"Snag points / modification if any"},
 
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Engg. Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Eng Team"},
+  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Eng Team"},
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
   {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
 
@@ -1031,23 +1062,6 @@ function getLatestStageDate(project, field="actualDate"){
 
 
 
-const DETAIL_ENGG_TEAM_LABEL = "Detail Engg. Team";
-
-function normalizeTechnicalTaskName(value){
-  const raw = String(value || "").trim();
-  if(!raw) return "";
-  const key = raw.toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  // Consolidate spelling/wording variants such as Detail Eng, Details Engg,
-  // Detail Enginerring and Detail Engineering Team into one standard label.
-  if(/^(detail|details|detailed)\s+eng/.test(key)) return DETAIL_ENGG_TEAM_LABEL;
-  return raw;
-}
-
 const TECHNICAL_TASK_ASSIGNMENTS = {
   "handover from sales and contracts to projects": "Process Team",
   "approved costing sheet": "Process Team",
@@ -1060,56 +1074,56 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
   "tds preparation after cost comparison of various makes": "Process Team",
   "tds preparation after cost comparison of various make": "Process Team",
   "p and id": "Process Team",
-  "plan and section": "Detail Engg. Team",
+  "plan and section": "Detail Eng Team",
   "client approval": "Process Team",
   "control philosophy": "Process Team",
   "indent 1": "Process Team",
-  "gfc and structural design fabrication drawing": "Detail Engg. Team",
+  "gfc and structural design fabrication drawing": "Details Eng Team",
   "client scope finalisation with quality control": "Process Team",
   "ga and sld with load list": "Electrical Team",
   "client approval panel foundation": "Process Team",
   "panel foundation": "Electrical Team",
-  "piping layout": "Detail Engg. Team",
+  "piping layout": "Detail Eng Team",
   "cable tray layout": "Electrical Team",
-  "indents 2 4 5 and 3": "Detail Engg. Team",
-  "indents 245 and 3": "Detail Engg. Team",
-  "indents 2 4 5 3": "Detail Engg. Team",
-  "indents 2 4 5 3a b": "Detail Engg. Team",
+  "indents 2 4 5 and 3": "Detail Engg.",
+  "indents 245 and 3": "Detail Engg.",
+  "indents 2 4 5 3": "Detail Engg.",
+  "indents 2 4 5 3a b": "Detail Engg.",
   "automation logic": "Electrical Team",
   "note for transition team": "Process Team",
-  "critical points and quality control measures drawings and material": "Detail Engg. Team",
-  "critical points and quality control measures for drawings and material": "Detail Engg. Team",
-  "micro billing schedule with short increase decrease of qty extra item possibility": "Detail Engg. Team",
-  "micro billing schedule with short increase and decrease of qty extra item possibility": "Detail Engg. Team",
+  "critical points and quality control measures drawings and material": "Detail Engineering Team",
+  "critical points and quality control measures for drawings and material": "Detail Engineering Team",
+  "micro billing schedule with short increase decrease of qty extra item possibility": "Detail Engineering Team",
+  "micro billing schedule with short increase and decrease of qty extra item possibility": "Detail Engineering Team",
   "final tds inputs": "Process Team",
-  "site mobilization file to be handed over to projects close loop with transition team too": "Detail Engg. Team",
-  "quality control of client work review": "Detail Engg. Team",
-  "over see how material is packed and dispatch": "Detail Engg. Team",
-  "oversee material packing and dispatch": "Detail Engg. Team",
-  "quality control": "Detail Engg. Team",
-  "check the qualification of site team critical inputs should be provided": "Detail Engg. Team",
-  "check site team qualification and provide critical inputs": "Detail Engg. Team",
-  "panel foundation need to check": "Detail Engg. Team",
-  "check panel foundation": "Detail Engg. Team",
+  "site mobilization file to be handed over to projects close loop with transition team too": "Detail Eng Team",
+  "quality control of client work review": "Detail Eng Team",
+  "over see how material is packed and dispatch": "Detail Eng Team",
+  "oversee material packing and dispatch": "Detail Eng Team",
+  "quality control": "Detail Eng Team",
+  "check the qualification of site team critical inputs should be provided": "Detail Eng Team",
+  "check site team qualification and provide critical inputs": "Detail Eng Team",
+  "panel foundation need to check": "Detail Eng Team",
+  "check panel foundation": "Detail Eng Team",
   "any deviation with tds related to e and i": "Electrical Team",
   "check any deviation with tds related to e and i": "Electrical Team",
-  "execution go ahead": "Detail Engg. Team",
-  "site visit": "Detail Engg. Team",
-  "check indent 6 and approve": "Detail Engg. Team",
-  "contractor demobilisation should be strictly after virtual completion certification": "Detail Engg. Team",
-  "contractor demobilisation only after virtual completion certification": "Detail Engg. Team",
+  "execution go ahead": "Detail Eng Team",
+  "site visit": "Detail Eng Team",
+  "check indent 6 and approve": "Detail Eng Team",
+  "contractor demobilisation should be strictly after virtual completion certification": "Details Eng Team",
+  "contractor demobilisation only after virtual completion certification": "Details Eng Team",
   "completion certification from the transition team": "Project Team",
-  "checking of mechanical work": "Detail Engg. Team",
-  "checking of mechanical work electrical progress and panel as per approved tds": "Detail Engg. Team",
+  "checking of mechanical work": "Detail Eng Team",
+  "checking of mechanical work electrical progress and panel as per approved tds": "Detail Eng Team",
   "measuring of electrical progress": "Electrical Team",
   "panel started as per approved tds": "Electrical Team",
-  "indent 7 8": "Detail Engg. Team",
+  "indent 7 8": "Detail Eng Team",
   "checklist approval dry wet run": "Process Team",
   "electrical checklist continuity rotation ampere": "Electrical Team",
   "indent 7 8 checklist approval dry wet run electrical checklist": "Process Team",
-  "final shade of piping paint tank filter": "Detail Engg. Team",
-  "paint dft should be mentioned in document": "Detail Engg. Team",
-  "as built submission and pfd dashboard provided to site team": "Detail Engg. Team",
+  "final shade of piping paint tank filter": "Detail Eng Team",
+  "paint dft should be mentioned in document": "Detail Eng Team",
+  "as built submission and pfd dashboard provided to site team": "Detail Eng Team",
   "monitor new technology equipment performance and involve services post de snagging": "Process Team",
   "for new technology or new equipment performance shall be closely monitored and feedback shall be obtained from the operations team site visits may be conducted if required": "Process Team",
   "full involvement of services post de snagging": "Process Team",
@@ -1117,9 +1131,9 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
   "submittals approval": "Process Team",
   "site visit if required": "Process Team",
   "technical review agenda": "Process Team",
-  "detailed engineering review": "Detail Engg. Team",
-  "drawings submittals approval": "Detail Engg. Team",
-  "critical points related to installation": "Detail Engg. Team",
+  "detailed engineering review": "Detail Eng Team",
+  "drawings submittals approval": "Detail Eng Team",
+  "critical points related to installation": "Detail Eng Team",
   "initial note with costing for internal approval": "Electrical Team",
   "indent 3a preparation": "Electrical Team",
   "electrical submittal approval": "Electrical Team",
@@ -1132,20 +1146,15 @@ const TECHNICAL_TASK_ASSIGNMENTS = {
 };
 
 function applyMinorTaskUpdates(){
-  let changed=0;
   (db.projects || []).forEach(p => {
     (p.tasks || []).forEach(t => {
       if(!t || t.dept !== "Technical Team") return;
       const key = canonicalTaskText(t.task);
-      const assignedTeam = TECHNICAL_TASK_ASSIGNMENTS[key];
-      const normalizedTeam = normalizeTechnicalTaskName(assignedTeam || t.technicalTask);
-      if(t.technicalTask !== normalizedTeam){
-        t.technicalTask = normalizedTeam;
-        changed++;
+      if(TECHNICAL_TASK_ASSIGNMENTS[key]){
+        t.technicalTask = TECHNICAL_TASK_ASSIGNMENTS[key];
       }
     });
   });
-  return changed;
 }
 
 let workflowSyncRunning = false;
@@ -1170,7 +1179,6 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
     lastUpdated: new Date().toLocaleString(),
     history: []
   };
-  if(task.dept === "Technical Team") task.technicalTask = normalizeTechnicalTaskName(task.technicalTask);
   addHistory(task, "Created", sourceText + (task.owner ? " and auto-assigned to " + task.owner : ""));
   return task;
 }
@@ -1283,22 +1291,20 @@ function readLocalDatabase(){
   if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
   if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
-  const technicalLabelsUpdated=applyMinorTaskUpdates();
+  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
   resetRuntimeCaches();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
-  return migrated || technicalLabelsUpdated>0;
+  return migrated;
 }
 
 function applyRemoteDatabase(remoteData){
   db=remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
-  const technicalLabelsUpdated=applyMinorTaskUpdates();
+  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
-  return migrated || technicalLabelsUpdated>0;
+  return migrated;
 }
 
 function load(){
@@ -1572,7 +1578,7 @@ function renderNotificationDashboard(){
       else if(daysFromToday(rec.initialPlanningDate)<0) notifications.push({level:'Stage Escalation Required',project,task:{task:`${group.stage} / ${group.sub}`,dept:'Stage Date',owner:'-'}});
     });
   });
-  el.innerHTML=notifications.slice(0,12).map(item=>`<div class="alert-item ${item.level==='Stage Escalation Required'?'overdue':''}"><b>${esc(item.level)}</b>: ${esc(item.task.task)}<div class="muted">${esc(item.project.name||'Project')} · ${esc(departmentLabel(item.task))} · Owner: ${esc(item.task.owner||'-')}</div></div>`).join('')||'<p class="muted">No system notifications.</p>';
+  el.innerHTML=notifications.slice(0,12).map(item=>`<div class="alert-item ${item.level==='Stage Escalation Required'?'overdue':''}"><b>${esc(item.level)}</b>: ${esc(item.task.task)}<div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)} · Owner: ${esc(item.task.owner||'-')}</div></div>`).join('')||'<p class="muted">No system notifications.</p>';
 }
 
 function renderMyTasksDashboard(owner){
@@ -1584,14 +1590,14 @@ function renderMyTasksDashboard(owner){
   el.innerHTML=matches.slice(0,12).map(item=>{
     const date=item.date==='9999-12-31'?'':item.date; const days=date?daysFromToday(date):null;
     const label=days===null?item.task.status:(days<0?'Stage Overdue':days===0?'Stage Due Today':days<=7?'Stage Due This Week':item.task.status);
-    return `<div class="mini-row"><div><b>${esc(item.task.task)}</b><div class="muted">${esc(item.project.name||'Project')} · ${esc(departmentLabel(item.task))}</div><span class="pill">${esc(label)}</span></div><span>${esc(formatDateDisplay(date)||'-')}</span></div>`;
+    return `<div class="mini-row"><div><b>${esc(item.task.task)}</b><div class="muted">${esc(item.project.name||'Project')} · ${esc(item.task.dept)}</div><span class="pill">${esc(label)}</span></div><span>${esc(formatDateDisplay(date)||'-')}</span></div>`;
   }).join('')||'<p class="muted">No pending tasks found for this owner.</p>';
 }
 
 function openProject(id){ currentProjectId=id; showProjectView(); }
 
 function getTechnicalDepartment(technicalTask){
-  const value = normalizeTechnicalTaskName(technicalTask);
+  const value = String(technicalTask || "").trim();
   return value ? `Technical Team - ${value}` : "Technical Team";
 }
 function departmentLabel(t){
@@ -1638,17 +1644,20 @@ function renderProject(){
     return;
   }
   cards.innerHTML='';
-  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr>';
+  let bodyHtml='';
+  const headerHtml='<thead><tr><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Planning</th><th>Visitor Person</th><th>Site Report</th><th>Check Points</th><th>Checking Person</th><th>Quality Check Report</th><th>Monthly Correspondence</th><th>Budget</th><th>Expenses Incurred</th><th>Planned Billing %</th><th>Actual Billing</th><th>Collection</th><th>Owner</th><th>Status</th><th>Remarks</th><th>Delay Reason</th><th>Last Updated</th><th>History</th><th>Action</th></tr></thead>';
   let lastStage='',lastSub='';
   visible.forEach(task=>{
-    if(task.stage!==lastStage){ html+=`<tr class="stage-row"><td colspan="23">${esc(task.stage)}</td></tr>`; lastStage=task.stage; lastSub=''; }
-    if(task.sub!==lastSub){ html+=`<tr class="substage-row"><td colspan="23">${esc(task.sub)}</td></tr>`; lastSub=task.sub; }
+    if(task.stage!==lastStage){ bodyHtml+=`<tr class="stage-row"><td colspan="23">${esc(task.stage)}</td></tr>`; lastStage=task.stage; lastSub=''; }
+    if(task.sub!==lastSub){ bodyHtml+=`<tr class="substage-row"><td colspan="23">${esc(task.sub)}</td></tr>`; lastSub=task.sub; }
     const editable=canEditTask(task),ownerEditable=canEditProject();
     const input=(field,value)=>`<input class="inline-input" value="${escAttr(value||'')}" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','${field}',this.value)">`;
-    html+=`<tr><td>${esc(task.stage)}</td><td>${esc(task.sub)}</td><td>${esc(departmentLabel(task))}</td><td>${esc(task.task)}</td><td>${input('planning',task.planning)}</td><td>${input('visitorPerson',task.visitorPerson)}</td><td>${input('siteReport',task.siteReport)}</td><td>${input('checkPoints',task.checkPoints)}</td><td>${input('checkingPerson',task.checkingPerson)}</td><td>${input('qualityCheckReport',task.qualityCheckReport)}</td><td>${input('monthlyCorrespondence',task.monthlyCorrespondence)}</td><td>${input('budget',task.budget)}</td><td>${input('expensesIncurred',task.expensesIncurred)}</td><td>${input('plannedBilling',task.plannedBilling)}</td><td>${input('actualBilling',task.actualBilling)}</td><td>${input('collection',task.collection)}</td><td><input class="inline-input" value="${escAttr(task.owner||'')}" ${ownerEditable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"></td><td><select class="inline-select" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','remarks',this.value)">${esc(task.remarks||'')}</textarea></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','delayReason',this.value)">${esc(task.delayReason||'')}</textarea></td><td>${esc(task.lastUpdated||'')}</td><td><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button></td><td><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${task.id}')">Delete</button></td></tr>`;
+    bodyHtml+=`<tr><td>${esc(task.stage)}</td><td>${esc(task.sub)}</td><td>${esc(departmentLabel(task))}</td><td>${esc(task.task)}</td><td>${input('planning',task.planning)}</td><td>${input('visitorPerson',task.visitorPerson)}</td><td>${input('siteReport',task.siteReport)}</td><td>${input('checkPoints',task.checkPoints)}</td><td>${input('checkingPerson',task.checkingPerson)}</td><td>${input('qualityCheckReport',task.qualityCheckReport)}</td><td>${input('monthlyCorrespondence',task.monthlyCorrespondence)}</td><td>${input('budget',task.budget)}</td><td>${input('expensesIncurred',task.expensesIncurred)}</td><td>${input('plannedBilling',task.plannedBilling)}</td><td>${input('actualBilling',task.actualBilling)}</td><td>${input('collection',task.collection)}</td><td><input class="inline-input" value="${escAttr(task.owner||'')}" ${ownerEditable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','owner',this.value.trim())"></td><td><select class="inline-select" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','status',this.value)">${STATUS.map(status=>`<option ${task.status===status?'selected':''}>${status}</option>`).join('')}</select></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','remarks',this.value)">${esc(task.remarks||'')}</textarea></td><td><textarea class="inline-input" style="min-width:180px;min-height:54px" ${editable?'':'disabled'} onchange="updateTaskField('${project.id}','${task.id}','delayReason',this.value)">${esc(task.delayReason||'')}</textarea></td><td>${esc(task.lastUpdated||'')}</td><td><button class="small" onclick="showTaskHistory('${task.id}')">${(task.history||[]).length} log</button></td><td><button class="small primary" onclick="openTaskForm('${task.id}')">Full Edit</button> <button class="small danger" onclick="deleteTask('${task.id}')">Delete</button></td></tr>`;
   });
-  table.innerHTML=html;
+  if(!bodyHtml) bodyHtml='<tr><td colspan="23" class="muted">No tasks match the selected filters.</td></tr>';
+  table.innerHTML=headerHtml+'<tbody>'+bodyHtml+'</tbody>';
 }
+
 function badge(st){ const c=st==="Done"?"done":st==="In Progress"?"progress":"todo"; return `<span class="status ${c}">${esc(st||"To Do")}</span>`; }
 function openProjectForm(id){
   if(!requirePermission(canEditProject(), "Only Admin/PM can add or edit project details.")) return;
@@ -1710,13 +1719,9 @@ function openTaskForm(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=taskId?p.tasks.find(x=>x.id===taskId):{status:"To Do"};
   if(taskId && !requirePermission(canFullEditTask(t), "Only Admin/PM can fully edit task details.")) return;
   if(!taskId && !requirePermission(canEditProject(), "Only Admin/PM can add new tasks.")) return;
-  const technicalValue=normalizeTechnicalTaskName(t.technicalTask);
-  const technicalOptions=[...TECHNICAL_TEAMS];
-  if(technicalValue && !technicalOptions.includes(technicalValue)) technicalOptions.push(technicalValue);
   document.getElementById("modalTitle").textContent=taskId?"Edit Task":"Add Task";
   document.getElementById("modalBody").innerHTML=`<div class="grid grid-3">
-    ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)}
-    <div><label>Technical Task</label><select id="f_technicalTask"><option value="">Select Technical Team</option>${technicalOptions.map(team=>`<option value="${escAttr(team)}" ${technicalValue===team?"selected":""}>${esc(team)}</option>`).join("")}</select></div>
+    ${field("Stage","stage",t.stage)} ${field("Sub-stage","sub",t.sub)} ${field("Technical Task","technicalTask",t.technicalTask)} 
     <div><label>Department</label><select id="f_dept">${DEPARTMENTS.map(d=>`<option ${t.dept===d?"selected":""}>${d}</option>`).join("")}</select></div>
     <div style="grid-column:1/-1"><label>Task</label><textarea id="f_task">${esc(t.task||"")}</textarea></div>
     ${field("Owner","owner",t.owner)}
@@ -1890,7 +1895,7 @@ function getMISRows(){
         client:p.client||"",
         stage:t.stage||"",
         sub:t.sub||"",
-        department:departmentLabel(t)||"",
+        department:t.dept||"",
         task:t.task||"",
         owner:t.owner||"",
         taskStatus:t.status||"",
@@ -1915,7 +1920,7 @@ function renderMIS(){
   const q=(document.getElementById("misSearch")?.value||"").toLowerCase();
   const dept=document.getElementById("misDeptFilter")?.value||"";
   const st=document.getElementById("misStatusFilter")?.value||"";
-  let rows=getMISRows().filter(r=>(!dept||r.department===dept||(dept==='Technical Team'&&r.department.startsWith('Technical Team - ')))&&(!st||r.taskStatus===st));
+  let rows=getMISRows().filter(r=>(!dept||r.department===dept)&&(!st||r.taskStatus===st));
   if(q){ rows=rows.filter(r=>Object.values(r).join(" ").toLowerCase().includes(q)); }
   setText("misRowsCount", rows.length);
   setText("misMomPending", rows.filter(r=>r.siteMom==="Pending").length);
@@ -1936,12 +1941,12 @@ function renderMIS(){
 
 function exportProjectCSV(){
   const p=db.projects.find(x=>x.id===currentProjectId); if(!p) return;
-  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),departmentLabel(t),t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
+  const rows=[["Project",p.name],["Job Code",p.jobCode],[],["Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Status","Remarks","Delay Reason","Last Updated","History Count"],...p.tasks.map(t=>[t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])];
   downloadFile(`${p.name||"project"}-tracker.csv`, csv(rows), "text/csv");
 }
 function exportAllCSV(){
   const rows=[["Project","Job Code","Client","Location","Project Manager","Target Date","Overall Status","Stage","Sub-stage","Stage Planned Date","Stage Actual Date","Department","Task","Owner","Task Status","Remarks","Delay Reason","Last Updated","History Count"]];
-  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),departmentLabel(t),t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
+  db.projects.forEach(p=>p.tasks.forEach(t=>rows.push([p.name,p.jobCode,p.client,p.location,p.manager,p.targetDate,p.overallStatus,t.stage,t.sub,stageDateForTask(p,t,"initialPlanningDate"),stageDateForTask(p,t,"actualDate"),t.dept,t.task,t.owner,t.status,t.remarks,t.delayReason,t.lastUpdated,(t.history||[]).length])));
   downloadFile("all-projects-tracker.csv", csv(rows), "text/csv");
 }
 function testFirebaseWrite(){
@@ -2720,7 +2725,6 @@ function updateTaskField(projectId,taskId,field,value){
   if(!project||!task) return;
   if(!canEditTask(task)){ alert('You can only update tasks assigned to you.'); scheduleActiveRender('project'); return; }
   if(field==='owner'&&!canEditProject()){ alert('Only Admin/PM can change owner.'); scheduleActiveRender('project'); return; }
-  if(field==='technicalTask') value=normalizeTechnicalTaskName(value);
   const oldValue=task[field]||''; if(String(oldValue)===String(value)) return;
   const oldStage=task.stage,oldSub=task.sub; const structural=field==='stage'||field==='sub';
   if(field==='status'&&isDoneStatus(oldValue)&&!isDoneStatus(value)&&!clearActualDateBeforeReopen(project,oldStage,oldSub)){ scheduleActiveRender('project'); return; }
@@ -2745,9 +2749,8 @@ function updateTaskField(projectId,taskId,field,value){
 function collectTaskFormData(){
   const taskName=document.getElementById('f_task')?.value.trim()||'';
   const stage=v('stage'), sub=v('sub');
-  const dept=document.getElementById('f_dept')?.value||'';
   if(!stage||!sub||!taskName){ alert('Stage, Sub-stage and Task are required.'); return null; }
-  return {stage,sub,technicalTask:dept==='Technical Team'?normalizeTechnicalTaskName(v('technicalTask')):'',dept,task:taskName,owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status')?.value||'To Do',remarks:document.getElementById('f_remarks')?.value.trim()||'',delayReason:document.getElementById('f_delayReason')?.value.trim()||'',lastUpdated:new Date().toISOString()};
+  return {stage,sub,technicalTask:v('technicalTask'),dept:document.getElementById('f_dept')?.value||'',task:taskName,owner:v('owner'),planning:v('planning'),visitorPerson:v('visitorPerson'),siteReport:v('siteReport'),checkPoints:v('checkPoints'),checkingPerson:v('checkingPerson'),qualityCheckReport:v('qualityCheckReport'),monthlyCorrespondence:v('monthlyCorrespondence'),budget:v('budget'),expensesIncurred:v('expensesIncurred'),plannedBilling:v('plannedBilling'),actualBilling:v('actualBilling'),collection:v('collection'),status:document.getElementById('f_status')?.value||'To Do',remarks:document.getElementById('f_remarks')?.value.trim()||'',delayReason:document.getElementById('f_delayReason')?.value.trim()||'',lastUpdated:new Date().toISOString()};
 }
 
 function saveTask(id){
