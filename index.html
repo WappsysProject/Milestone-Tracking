@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Project Tracking Dashboard V17</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
+  <title>Project Tracking Dashboard V20</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -108,12 +111,7 @@
     .table-scroll table{min-width:1200px}
     .mis-note{font-size:12px;color:var(--muted);margin:6px 0 12px}
 
-    /* V17 performance safeguards */
-    #taskTable tbody, #mobileTaskCards{contain:layout style paint}
-    #taskTable tr, .mobile-task-card{content-visibility:auto;contain-intrinsic-size:48px}
-    .task-pagination{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:10px}
-    .task-pagination select{width:auto;min-width:82px}
-    .task-pagination .muted{min-width:180px;text-align:center}
+    /* Render every task row normally so no rows are clipped or skipped. */
     .saving-indicator{font-weight:700}
   </style>
 </head>
@@ -258,23 +256,16 @@
 
       <div class="card">
         <div class="toolbar">
-          <h3 style="margin:0">Detailed Task Tracker</h3>
+          <div><h3 style="margin:0">Detailed Task Tracker</h3><p class="muted" style="margin:4px 0 0">All matching tasks are displayed on one page. No row limit or pagination.</p></div>
           <div class="row">
-            <select id="filterDept" onchange="resetTaskPaginationAndRender()"><option value="">All Departments</option></select>
-            <select id="filterStatus" onchange="resetTaskPaginationAndRender()"><option value="">All Status</option><option>To Do</option><option>In Progress</option><option>Done</option></select>
+            <select id="filterDept" onchange="renderFilteredTasks()"><option value="">All Departments</option></select>
+            <select id="filterStatus" onchange="renderFilteredTasks()"><option value="">All Status</option><option>To Do</option><option>In Progress</option><option>Done</option></select>
             <input id="filterText" placeholder="Search task/stage/owner..." oninput="scheduleProjectFilterRender()" style="width:240px"/>
             <button onclick="autoAssignCurrentProject()">Auto Assign Owners</button>
             <button class="primary" onclick="openTaskForm()">+ Add Task</button>
           </div>
         </div>
-        <div class="task-pagination">
-          <span class="muted" id="taskPageInfo">0 tasks</span>
-          <label style="margin:0">Rows</label>
-          <select id="taskPageSize" onchange="changeTaskPageSize(this.value)"><option>15</option><option selected>25</option><option>50</option><option>100</option></select>
-          <button type="button" id="taskPrevButton" onclick="changeTaskPage(-1)">Previous</button>
-          <button type="button" id="taskNextButton" onclick="changeTaskPage(1)">Next</button>
-        </div>
-        <div class="table-scroll" style="overflow:auto;max-height:72vh;margin-top:12px">
+        <div class="table-scroll" style="overflow:auto;margin-top:12px">
           <table id="taskTable"></table>
         </div>
         <div id="mobileTaskCards"></div>
@@ -355,7 +346,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V19 | Retrospective Actual Dates from Task Log + Global Log + doneAt + Last Updated</div>
+<div class="footer">Project Tracker V20 | All matching tasks visible with no row limits</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -376,13 +367,10 @@ let currentUserRole = "Viewer";
 let currentUserRecord = null;
 
 
-/* V17 runtime-only performance state. None of this is written to Firebase. */
+/* V20 runtime state. Task pagination is intentionally disabled. */
 let projectRuntimeCache = new WeakMap();
 let stageDatePrepared = new WeakSet();
 let workflowGroupBlueprint = null;
-let taskPage = 1;
-let taskPageSize = 25;
-let taskPageCount = 1;
 let activeRenderFrame = 0;
 let dashboardFilterTimer = 0;
 let projectFilterTimer = 0;
@@ -395,6 +383,8 @@ let remoteSavePending = false;
 let remoteSaveWaiters = [];
 let remoteSaveSilent = true;
 let remoteSnapshotSeen = false;
+let projectDeleteInFlight = false;
+const pendingProjectDeletionIds = new Set();
 let globalDoneActivityIndex = null;
 
 function resetRuntimeCaches(){
@@ -468,20 +458,13 @@ function scheduleDashboardFilterRender(delay=140){
 }
 function scheduleProjectFilterRender(delay=140){
   clearTimeout(projectFilterTimer);
-  projectFilterTimer=setTimeout(()=>{ taskPage=1; renderProject(); },delay);
+  projectFilterTimer=setTimeout(()=>renderProject(),delay);
 }
 function scheduleMISFilterRender(delay=140){
   clearTimeout(misFilterTimer);
   misFilterTimer=setTimeout(()=>renderMIS(),delay);
 }
-function resetTaskPaginationAndRender(){ taskPage=1; scheduleActiveRender('project'); }
-function changeTaskPage(delta){ taskPage=Math.min(Math.max(1,taskPage+Number(delta||0)),taskPageCount); scheduleActiveRender('project'); }
-function changeTaskPageSize(value){
-  const parsed=Number(value);
-  taskPageSize=[15,25,50,100].includes(parsed)?parsed:25;
-  taskPage=1;
-  scheduleActiveRender('project');
-}
+function renderFilteredTasks(){ scheduleActiveRender('project'); }
 function scheduleLocalBackup(immediate=false){
   clearTimeout(localBackupTimer);
   if(localBackupIdleHandle && window.cancelIdleCallback) cancelIdleCallback(localBackupIdleHandle);
@@ -1263,12 +1246,20 @@ function showAppScreen(){
   if(app){ app.classList.remove("hidden"); app.style.display = "block"; }
 }
 
+function applyDeletedProjectTombstones(){
+  const deleted=db?.meta?.deletedProjects;
+  if(!deleted||typeof deleted!=='object'||!Array.isArray(db.projects)) return;
+  const deletedIds=new Set(Object.keys(deleted));
+  if(!deletedIds.size) return;
+  db.projects=db.projects.filter(project=>project && !deletedIds.has(project.id));
+}
+
 function readLocalDatabase(){
   const localCopy=localStorage.getItem('projectTrackerDB');
   if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
   if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates();
+  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
   resetRuntimeCaches();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
@@ -1278,7 +1269,7 @@ function readLocalDatabase(){
 function applyRemoteDatabase(remoteData){
   db=remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}};
   if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  resetRuntimeCaches(); ensureUsers(); normalizeAllDates(); applyMinorTaskUpdates();
+  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); applyMinorTaskUpdates();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
   return migrated;
@@ -1300,6 +1291,10 @@ function load(){
       if(mode) mode.textContent='Firebase connected — initializing shared database';
       if(firebase.auth().currentUser) void persistDatabase({silent:true,immediate:true}).then(result=>{ if(mode) mode.textContent=result.ok?'Firebase Shared Database + Authentication':'Browser backup active — Firebase initialization failed'; });
       return;
+    }
+    // Never re-display a project that is currently being deleted by this browser.
+    if(pendingProjectDeletionIds.size && Array.isArray(remoteData?.projects)){
+      remoteData.projects=remoteData.projects.filter(project=>project && !pendingProjectDeletionIds.has(project.id));
     }
     const incomingRevision=Number(remoteData?.meta?.revision||0);
     if(remoteSnapshotSeen && incomingRevision<=lastKnownRemoteRevision) return;
@@ -1567,7 +1562,7 @@ function renderMyTasksDashboard(owner){
   }).join('')||'<p class="muted">No pending tasks found for this owner.</p>';
 }
 
-function openProject(id){ currentProjectId=id; taskPage=1; showProjectView(); }
+function openProject(id){ currentProjectId=id; showProjectView(); }
 
 function getTechnicalDepartment(technicalTask){
   const value = String(technicalTask || "").trim();
@@ -1606,13 +1601,8 @@ function renderProject(){
     const blob=`${task.task||''} ${task.stage||''} ${task.sub||''} ${task.owner||''} ${dept||''} ${task.technicalTask||''}`.toLowerCase();
     return (!fd||task.dept===fd||dept===fd)&&(!fs||task.status===fs)&&(!ft||blob.includes(ft));
   });
-  taskPageCount=Math.max(1,Math.ceil(filtered.length/taskPageSize));
-  taskPage=Math.min(Math.max(1,taskPage),taskPageCount);
-  const start=(taskPage-1)*taskPageSize;
-  const visible=filtered.slice(start,start+taskPageSize);
-  setText('taskPageInfo',`${filtered.length} task${filtered.length===1?'':'s'} · Page ${taskPage} of ${taskPageCount}`);
-  const prev=document.getElementById('taskPrevButton'),next=document.getElementById('taskNextButton'),size=document.getElementById('taskPageSize');
-  if(prev) prev.disabled=taskPage<=1; if(next) next.disabled=taskPage>=taskPageCount; if(size) size.value=String(taskPageSize);
+  // Show every task matching the selected filters; no pagination or row limit.
+  const visible=filtered;
 
   const mobile=window.matchMedia('(max-width:760px)').matches;
   const table=document.getElementById('taskTable'); const cards=document.getElementById('mobileTaskCards');
@@ -1684,7 +1674,7 @@ function saveProject(id){
   const data={name:v('name'),jobCode:v('jobCode'),client:v('client'),orderValue:v('orderValue'),rmcBudget:v('rmcBudget'),freightValue:v('freightValue'),siteExpenses:v('siteExpenses'),contractorBudget:v('contractorBudget'),technology:v('technology'),location:v('location'),startDate:v('startDate'),targetDate:v('targetDate'),manager:v('manager'),ownerContracts:v('ownerContracts'),ownerTechnical:v('ownerTechnical'),ownerPurchase:v('ownerPurchase'),ownerProjects:v('ownerProjects'),ownerTransition:v('ownerTransition'),ownerBilling:v('ownerBilling'),overallStatus:document.getElementById('f_overallStatus').value};
   let created=false;
   if(id){ const project=db.projects.find(item=>item.id===id); Object.assign(project,data); invalidateProjectCache(project); addGlobalActivity(project,{id:'',task:'Project details'},'Project Updated','Project details updated'); }
-  else{ const project={id:uid(),...data,tasks:[],stageDates:{}}; project.tasks=WORKFLOW_TEMPLATE.map(item=>createWorkflowTaskFromTemplate(item,project,'Task created from workflow template')); ensureStageDates(project); db.projects.push(project); addGlobalActivity(project,{id:'',task:'Project created'},'Project Created','New project created with workflow template'); currentProjectId=project.id; taskPage=1; created=true; }
+  else{ const project={id:uid(),...data,tasks:[],stageDates:{}}; project.tasks=WORKFLOW_TEMPLATE.map(item=>createWorkflowTaskFromTemplate(item,project,'Task created from workflow template')); ensureStageDates(project); db.projects.push(project); addGlobalActivity(project,{id:'',task:'Project created'},'Project Created','New project created with workflow template'); currentProjectId=project.id; created=true; }
   closeModal();
   if(created) showProjectView(); else scheduleActiveRender();
   void persistDatabase({immediate:true});
@@ -1739,11 +1729,92 @@ function deleteTask(id){
   const stage=task.stage,sub=task.sub; addGlobalActivity(project,task,'Task Deleted','Task deleted'); project.tasks=project.tasks.filter(item=>item.id!==id);
   invalidateProjectCache(project,true); ensureStageDates(project); synchronizeSubStageActualDate(project,stage,sub); scheduleActiveRender('project'); void persistDatabase();
 }
-function deleteCurrentProject(){
+async function deleteCurrentProject(){
   if(!requirePermission(canDelete(),'Only Admin can delete projects.')) return;
-  if(!confirm('Delete current project?')) return;
-  const project=db.projects.find(item=>item.id===currentProjectId); addGlobalActivity(project,{id:'',task:'Project deleted'},'Project Deleted','Project deleted');
-  db.projects=db.projects.filter(item=>item.id!==currentProjectId); currentProjectId=null; resetRuntimeCaches(); showDashboard(); void persistDatabase({immediate:true});
+  if(projectDeleteInFlight){ alert('Project deletion is already in progress.'); return; }
+  const projectId=currentProjectId;
+  const project=(db.projects||[]).find(item=>item.id===projectId);
+  if(!project){ showDashboard(); return; }
+  if(!confirm(`Permanently delete project "${project.name||'Untitled Project'}"?`)) return;
+
+  projectDeleteInFlight=true;
+  pendingProjectDeletionIds.add(projectId);
+
+  const deletionActivity={
+    id:uid(),
+    at:new Date().toLocaleString(),
+    by:currentUser||'Unknown User',
+    projectId,
+    projectName:project.name||'',
+    taskId:'',
+    taskName:'Project deleted',
+    action:'Project Deleted',
+    details:'Project permanently deleted by Admin'
+  };
+
+  // Remove immediately from the current screen and browser backup.
+  db.projects=(db.projects||[]).filter(item=>item && item.id!==projectId);
+  if(!db.meta||typeof db.meta!=='object') db.meta={};
+  if(!db.meta.deletedProjects||typeof db.meta.deletedProjects!=='object') db.meta.deletedProjects={};
+  db.meta.deletedProjects[projectId]={deletedAt:new Date().toISOString(),deletedBy:currentUserEmail||currentUser||'Unknown User',projectName:project.name||''};
+  if(!Array.isArray(db.activity)) db.activity=[];
+  db.activity.unshift(deletionActivity);
+  db.activity=db.activity.slice(0,200);
+  currentProjectId=null;
+  resetRuntimeCaches();
+  prepareDatabaseForSave();
+  saveLocalBackup();
+  showDashboard();
+
+  try{
+    if(!(firebaseReady&&firebaseDBRef&&firebase.auth().currentUser)){
+      alert('Project removed from this browser. Firebase is unavailable, so permanent shared deletion will complete after a successful online save.');
+      return;
+    }
+
+    // Delete against the latest Firebase database, not against a possibly stale local copy.
+    const result=await new Promise(resolve=>{
+      let settled=false;
+      const finish=value=>{ if(settled) return; settled=true; clearTimeout(timer); resolve(value); };
+      const timer=setTimeout(()=>finish({ok:false,timeout:true,error:new Error('Project deletion timed out')}),20000);
+      firebaseDBRef.transaction(current=>{
+        const next=current&&typeof current==='object'
+          ? (typeof structuredClone==='function'?structuredClone(current):JSON.parse(JSON.stringify(current)))
+          : {projects:[],users:{},activity:[],meta:{}};
+        const remoteProjects=Array.isArray(next.projects)?next.projects:Object.values(next.projects||{});
+        next.projects=remoteProjects.filter(item=>item && item.id!==projectId);
+        const remoteActivity=Array.isArray(next.activity)?next.activity:Object.values(next.activity||{});
+        // Avoid duplicate deletion log if Firebase retries this transaction.
+        next.activity=[deletionActivity,...remoteActivity.filter(item=>item && item.id!==deletionActivity.id)].slice(0,200);
+        if(!next.meta||typeof next.meta!=='object') next.meta={};
+        if(!next.meta.deletedProjects||typeof next.meta.deletedProjects!=='object') next.meta.deletedProjects={};
+        next.meta.deletedProjects[projectId]={deletedAt:new Date().toISOString(),deletedBy:currentUserEmail||currentUser||'Unknown User',projectName:project.name||''};
+        next.meta.revision=Number(next.meta.revision||0)+1;
+        next.meta.updatedAt=new Date().toISOString();
+        next.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
+        return next;
+      },(error,committed,snapshot)=>{
+        if(error){ console.error('Permanent project deletion failed',error); finish({ok:false,error}); return; }
+        if(!committed){ finish({ok:false,error:new Error('Deletion was not committed')}); return; }
+        finish({ok:true,data:snapshot.val()});
+      },false);
+    });
+
+    if(!result.ok){
+      if(result.timeout) alert('Firebase is responding slowly. The project remains removed in this browser, but shared deletion could not be confirmed. Please try again while online.');
+      else alert('The project was removed locally, but Firebase did not confirm the permanent deletion: '+(result.error?.message||'Unknown error'));
+      return;
+    }
+
+    applyRemoteDatabase(result.data);
+    remoteSnapshotSeen=true;
+    saveLocalBackup();
+    showDashboard();
+    alert('Project permanently deleted.');
+  }finally{
+    pendingProjectDeletionIds.delete(projectId);
+    projectDeleteInFlight=false;
+  }
 }
 function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
 function esc(s){ return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m])); }
@@ -1863,7 +1934,7 @@ function restoreBackup(event){
   const file=event.target.files[0]; if(!file) return;
   const reader=new FileReader();
   reader.onload=()=>{
-    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); normalizeAllDates(); ensureUsers(); migrateHistoricalCompletionData(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
+    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); migrateHistoricalCompletionData(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
     catch(error){ alert('Invalid JSON backup.'); }
     finally{ event.target.value=''; }
   };
@@ -2575,7 +2646,9 @@ function persistDatabase(options={}){
   if(!firebase.auth().currentUser){ if(!silent) alert('Please login first. Firebase Authentication is required to save data.'); return Promise.resolve({ok:false,error:new Error('Not authenticated')}); }
   remoteSavePending=true; if(!silent) remoteSaveSilent=false;
   const promise=new Promise(resolve=>remoteSaveWaiters.push(resolve));
-  clearTimeout(remoteSaveTimer); remoteSaveTimer=setTimeout(flushRemoteSave,450);
+  clearTimeout(remoteSaveTimer);
+  if(immediate) Promise.resolve().then(flushRemoteSave);
+  else remoteSaveTimer=setTimeout(flushRemoteSave,450);
   return promise;
 }
 async function flushRemoteSave(){
