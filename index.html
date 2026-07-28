@@ -318,7 +318,7 @@
         <div class="toolbar">
           <div>
             <h3 style="margin:0">Sub-stage-wise Dates</h3>
-            <p class="muted" style="margin:4px 0 0">Planned and actual dates are maintained separately for each sub-stage. MIS Summary will use these sub-stage dates.</p>
+            <p class="muted" style="margin:4px 0 0">Planned Date and Actual Date are entered manually, saved separately for each sub-stage, and can be edited at any time. MIS Summary will use these saved dates.</p>
           </div>
         </div>
         <div class="table-scroll" style="overflow:auto;max-height:45vh;margin-top:12px">
@@ -410,7 +410,7 @@ Do not paste PASTE_HERE values anywhere.
 Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button> <button class="primary" onclick="recalculateHistoricalActualDates()">Recalculate Historical Actual Dates</button>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -2504,7 +2504,7 @@ function exportMISCSV(){
 }
 /* ===== END CORRECTED PROJECT-WISE MIS SUMMARY DATES ===== */
 
-/* ===== PERFORMANCE + RETROSPECTIVE SUB-STAGE ACTUAL DATE ENGINE V19 =====
+/* ===== MANUAL SUB-STAGE ACTUAL DATE MODE V20 =====
    Design guarantees:
    - One implementation for each critical save/task/date/render function.
    - Rendering never mutates data and never writes to Firebase.
@@ -2575,7 +2575,7 @@ function isDoneStatus(value){
   return status==='done' || status==='completed' || status==='complete';
 }
 function isManualActualDate(rec){
-  return String(rec?.actualDateSource||'').startsWith('manual-historical-v');
+  return !!normalizeDateForInput(rec?.actualDate);
 }
 
 function historyEntryText(entry){
@@ -2837,69 +2837,14 @@ function deriveSubStageDateState(project,stage,sub){
   return state;
 }
 
+// Manual Actual Date mode: task status must never create, replace or clear a sub-stage Actual Date.
+// These compatibility functions intentionally do nothing because older code paths still call them.
 function synchronizeSubStageActualDate(project,stage,sub){
-  ensureStageDates(project);
-  const rec=getStageDateRecord(project,stage,sub);
-  const state=deriveSubStageDateState(project,stage,sub);
-  const before=JSON.stringify({
-    actualDate:rec.actualDate||'',
-    source:rec.actualDateSource||'',
-    review:!!rec.actualDateReviewRequired,
-    evidence:rec.actualDateEvidence||null
-  });
-
-  if(isManualActualDate(rec)&&normalizeDateForInput(rec.actualDate)){
-    rec.actualDateReviewRequired=false;
-  }else if(!state.allDone){
-    rec.actualDate='';
-    rec.actualDateSource='';
-    rec.actualDateReviewRequired=false;
-    delete rec.actualDateEvidence;
-  }else if(state.canAutoDate){
-    rec.actualDate=state.automaticDate;
-    rec.actualDateSource=completionSourceForRecord(state.latestEvidence?.source);
-    rec.actualDateReviewRequired=false;
-    rec.actualDateUpdatedBy='System';
-    rec.actualDateEvidence={
-      totalTasks:state.tasks.length,
-      datedTasks:state.availableEvidence.length,
-      missingTaskDates:state.missingEvidenceCount,
-      doneLog:Number(state.sourceCounts['done-log']||0),
-      doneAt:Number(state.sourceCounts['done-at']||0),
-      lastUpdated:Number(state.sourceCounts['last-updated']||0),
-      latestTaskDate:state.automaticDate
-    };
-  }else{
-    rec.actualDate='';
-    rec.actualDateSource='';
-    rec.actualDateReviewRequired=true;
-    rec.actualDateEvidence={
-      totalTasks:state.tasks.length,
-      datedTasks:0,
-      missingTaskDates:state.tasks.length,
-      doneLog:0,
-      doneAt:0,
-      lastUpdated:0
-    };
-  }
-
-  const after=JSON.stringify({
-    actualDate:rec.actualDate||'',
-    source:rec.actualDateSource||'',
-    review:!!rec.actualDateReviewRequired,
-    evidence:rec.actualDateEvidence||null
-  });
-  if(before!==after){
-    rec.actualDateUpdatedAt=new Date().toISOString();
-    return true;
-  }
   return false;
 }
 
 function synchronizeAllProjectDates(project){
-  let changed=false;
-  getProjectRuntime(project).groups.forEach(group=>{ if(synchronizeSubStageActualDate(project,group.stage,group.sub)) changed=true; });
-  return changed;
+  return false;
 }
 
 function prepareDatabaseForSave(){
@@ -2975,12 +2920,8 @@ async function flushRemoteSave(){
 function save(){ scheduleActiveRender(); return persistDatabase(); }
 
 function clearActualDateBeforeReopen(project,stage,sub){
-  ensureStageDates(project); const rec=getStageDateRecord(project,stage,sub);
-  if(!rec.actualDate) return true;
-  const label=isManualActualDate(rec)?'manually corrected':'automatic';
-  if(!confirm(`This Sub-stage has an ${label} Actual Date (${formatDateDisplay(rec.actualDate)}). Reopening the task will clear it. Continue?`)) return false;
-  rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString();
-  invalidateProjectCache(project); return true;
+  // Actual Date is fully manual and independent of task status.
+  return true;
 }
 
 function updateTaskField(projectId,taskId,field,value){
@@ -3050,111 +2991,109 @@ function saveTask(id){
 }
 
 function setHistoricalActualDate(projectId,key,value){
-  if(!requirePermission(canEditProject(),'Only Admin/PM can correct historical Actual Dates.')) return;
-  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
-  const rec=project.stageDates[key]; if(!rec) return;
-  const date=normalizeDateForInput(value); if(!date){ alert('Please select a valid Actual Date.'); scheduleActiveRender('project'); return; }
-  if(date>today()){ alert('Actual Date cannot be in the future.'); scheduleActiveRender('project'); return; }
-  const old=normalizeDateForInput(rec.actualDate)||''; rec.actualDate=date; rec.actualDateSource='manual-historical-v19'; rec.actualDateReviewRequired=false; rec.actualDateUpdatedAt=new Date().toISOString(); rec.actualDateUpdatedBy=currentUser||currentUserEmail||'Unknown User';
-  addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Historical Actual Date Corrected',`Actual Date changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)}" by ${rec.actualDateUpdatedBy}`);
-  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase();
+  // Backward-compatible wrapper for older HTML/event references.
+  return updateStageDate(projectId,key,'actualDate',value);
 }
 
 function resetActualDateToAuto(projectId,key){
-  if(!requirePermission(canEditProject(),'Only Admin/PM can reset Actual Dates.')) return;
-  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
-  const rec=project.stageDates[key]; if(!rec) return; rec.actualDate=''; rec.actualDateSource=''; rec.actualDateReviewRequired=false;
-  invalidateProjectCache(project); synchronizeSubStageActualDate(project,rec.stage,rec.sub);
-  addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Actual Date Reset',rec.actualDate?`Reset to automatic date ${formatDateDisplay(rec.actualDate)}`:'Automatic date unavailable; manual historical date is required');
-  scheduleActiveRender('project'); void persistDatabase();
+  // Automatic Actual Dates are disabled. This now only clears the manual value after confirmation.
+  if(!confirm('Clear this manually entered Actual Date?')) return;
+  return updateStageDate(projectId,key,'actualDate','');
 }
 
 function updateStageDate(projectId,key,field,value){
-  if(field==='actualDate'){ setHistoricalActualDate(projectId,key,value); return; }
-  if(!requirePermission(canEditProject(),'Only Admin/PM can update stage dates.')) return;
-  const project=(db.projects||[]).find(item=>item.id===projectId); if(!project) return; ensureStageDates(project);
-  const rec=project.stageDates[key]; if(!rec) return; const date=normalizeDateForInput(value),old=rec[field]||''; if(old===date) return;
-  rec[field]=date; addGlobalActivity(project,{id:'',task:`${rec.stage} / ${rec.sub}`} ,'Stage Date Updated',`Planned date changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)||'-'}"`);
-  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase();
-}
+  if(!requirePermission(canEditProject(),'Only Admin/PM can update sub-stage dates.')) return;
+  if(!['initialPlanningDate','actualDate'].includes(field)) return;
 
-function renderStageDateTable(project){
-  const table=document.getElementById('stageDateTable'); if(!table) return;
+  const project=(db.projects||[]).find(item=>item.id===projectId);
+  if(!project) return;
   ensureStageDates(project);
-  // Defensive reconciliation: guarantees the Project Tracker table reflects current task statuses
-  // even when data came from an older backup or a remote snapshot created by an earlier version.
-  const reconciled=synchronizeAllProjectDates(project);
-  if(reconciled){
-    scheduleLocalBackup(true);
-    setTimeout(()=>{ void persistDatabase({silent:true}); },0);
-  }
-  const editable=canEditProject(); const groups=getProjectRuntime(project).groups;
-  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Date Mode</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>';
-  groups.forEach(group=>{
-    const rec=getStageDateRecord(project,group.stage,group.sub); const state=deriveSubStageDateState(project,group.stage,group.sub);
-    const manual=isManualActualDate(rec); const automatic=String(rec.actualDateSource||'').startsWith('automatic-');
-    const status=state.allDone?'Completed':(state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
-    const needsManual=state.allDone&&!state.canAutoDate&&!manual; let actualCell,mode;
-    const autoTitle=state.allDone
-      ? (state.usesLastUpdatedFallback?'Automatically calculated from the latest Done log/doneAt/Last Updated among completed tasks. You can correct it using the calendar.':'Automatically calculated from the latest Done-status log or stored Done timestamp. You can correct it using the calendar.')
-      : 'Select or edit the Sub-stage Actual Date using the calendar.';
-    const actualValue=normalizeDateForInput(rec.actualDate)||(state.allDone?state.automaticDate:'')||'';
-    actualCell=`<div class="row" style="gap:6px;flex-wrap:nowrap"><input class="inline-input" type="date" value="${escAttr(actualValue)}" ${editable?'':'disabled'} onchange="setHistoricalActualDate('${project.id}','${escAttr(group.key)}',this.value)" title="${escAttr(autoTitle)}">${manual&&editable?`<button type="button" onclick="resetActualDateToAuto('${project.id}','${escAttr(group.key)}')">Reset Auto</button>`:''}</div>`;
-    mode=manual?'Manual':(state.allDone?(state.canAutoDate?(state.usesLastUpdatedFallback?'Auto (Done/Last Updated)':'Auto (Done log/time)'):'Manual date required'):'Not completed');
-    html+=`<tr><td>${esc(group.stage)}</td><td>${esc(group.sub)}</td><td><input class="inline-input" type="date" value="${escAttr(normalizeDateForInput(rec.initialPlanningDate)||'')}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)"></td><td>${actualCell}</td><td><span class="pill">${esc(mode)}</span></td><td>${esc(status)}</td><td>${state.pending}</td></tr>`;
-  }); table.innerHTML=html;
-}
 
-function runRetrospectiveSubStageSyncOnce(){
-  const changed=migrateHistoricalCompletionData();
-  if(changed){
-    scheduleLocalBackup();
-    scheduleActiveRender();
-    return persistDatabase({silent:true}).then(()=>true);
+  const rec=project.stageDates[key];
+  if(!rec) return;
+
+  const raw=String(value||'').trim();
+  const date=raw ? normalizeDateForInput(raw) : '';
+  if(raw && !date){
+    alert('Please select a valid date.');
+    scheduleActiveRender('project');
+    return;
   }
+  if(field==='actualDate' && date && date>today()){
+    alert('Actual Date cannot be in the future.');
+    scheduleActiveRender('project');
+    return;
+  }
+
+  const old=normalizeDateForInput(rec[field])||'';
+  if(old===date) return;
+
+  rec[field]=date;
+  const updatedBy=currentUser||currentUserEmail||'Unknown User';
+  const fieldLabel=field==='actualDate'?'Actual Date':'Planned Date';
+
+  if(field==='actualDate'){
+    // Preserve the date as a manual value. No status or completion logic may overwrite it.
+    rec.actualDateSource=date?'manual-v20':'';
+    rec.actualDateReviewRequired=false;
+    rec.actualDateUpdatedAt=new Date().toISOString();
+    rec.actualDateUpdatedBy=updatedBy;
+    delete rec.actualDateEvidence;
+  }
+
+  addGlobalActivity(
+    project,
+    {id:'',task:`${rec.stage} / ${rec.sub}`},
+    `${fieldLabel} Updated`,
+    `${fieldLabel} changed from "${formatDateDisplay(old)||'-'}" to "${formatDateDisplay(date)||'-'}" by ${updatedBy}`
+  );
+
+  invalidateProjectCache(project);
+  scheduleLocalBackup(true);
+  scheduleActiveRender('project');
+  void persistDatabase({immediate:true});
+}
+function renderStageDateTable(project){
+  const table=document.getElementById('stageDateTable');
+  if(!table) return;
+
+  ensureStageDates(project);
+  const editable=canEditProject();
+  const groups=getProjectRuntime(project).groups;
+
+  let html='<tr><th>Stage</th><th>Sub-stage</th><th>Sub-stage Planned Date</th><th>Sub-stage Actual Date</th><th>Sub-stage Status</th><th>Pending Tasks</th></tr>';
+
+  groups.forEach(group=>{
+    const rec=getStageDateRecord(project,group.stage,group.sub);
+    const state=deriveSubStageDateState(project,group.stage,group.sub);
+    const status=state.allDone
+      ? 'Completed'
+      : (state.tasks.some(task=>cleanStatus(task.status)==='in progress')?'In Progress':'Pending');
+
+    const plannedValue=normalizeDateForInput(rec.initialPlanningDate)||'';
+    const actualValue=normalizeDateForInput(rec.actualDate)||'';
+
+    html+=`<tr>
+      <td>${esc(group.stage)}</td>
+      <td>${esc(group.sub)}</td>
+      <td><input class="inline-input" type="date" value="${escAttr(plannedValue)}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','initialPlanningDate',this.value)" title="Enter or edit the manual Planned Date"></td>
+      <td><input class="inline-input" type="date" value="${escAttr(actualValue)}" ${editable?'':'disabled'} onchange="updateStageDate('${project.id}','${escAttr(group.key)}','actualDate',this.value)" title="Enter or edit the manual Actual Date"></td>
+      <td>${esc(status)}</td>
+      <td>${state.pending}</td>
+    </tr>`;
+  });
+
+  table.innerHTML=html;
+}
+function runRetrospectiveSubStageSyncOnce(){
+  // Automatic Actual Date calculation is disabled.
   return Promise.resolve(false);
 }
 
 async function recalculateHistoricalActualDates(){
-  if(!requirePermission(canEditProject(),'Only Admin/PM can recalculate historical Actual Dates.')) return;
-
-  let doneTasks=0;
-  let completedSubStages=0;
-  let datesBefore=new Map();
-  (db.projects||[]).forEach(project=>{
-    ensureStageDates(project);
-    (project.tasks||[]).forEach(task=>{ if(isDoneStatus(task.status)) doneTasks++; });
-    Object.entries(project.stageDates||{}).forEach(([key,rec])=>{
-      datesBefore.set(`${project.id}|||${key}`,normalizeDateForInput(rec.actualDate)||'');
-    });
-  });
-
-  resetRuntimeCaches();
-  const migrated=migrateHistoricalCompletionData();
-  let updatedSubStages=0;
-  (db.projects||[]).forEach(project=>{
-    invalidateProjectCache(project);
-    synchronizeAllProjectDates(project);
-    getProjectRuntime(project).groups.forEach(group=>{
-      const state=deriveSubStageDateState(project,group.stage,group.sub);
-      if(state.allDone){
-        completedSubStages++;
-        const rec=getStageDateRecord(project,group.stage,group.sub);
-        const before=datesBefore.get(`${project.id}|||${group.key}`)||'';
-        const after=normalizeDateForInput(rec.actualDate)||'';
-        if(before!==after) updatedSubStages++;
-      }
-    });
-  });
-
-  scheduleLocalBackup(true);
-  scheduleActiveRender();
-  const result=await persistDatabase({silent:true,immediate:true});
-  const storageMessage=result?.ok ? '' : `\nThe recalculated dates are saved in the browser backup, but Firebase saving did not complete.`;
-  alert(`Historical Actual Date recalculation completed.\n\nDone tasks checked: ${doneTasks}\nCompleted Sub-stages checked: ${completedSubStages}\nActual Dates changed: ${updatedSubStages}\nHistorical task data migrated: ${migrated?'Yes':'No'}${storageMessage}`);
+  alert('Automatic Actual Date calculation is disabled. Enter or edit Actual Dates manually in Project Tracker → Sub-stage-wise Dates.');
 }
-
-/* ===== END PERFORMANCE + RETROSPECTIVE SUB-STAGE ACTUAL DATE ENGINE V19 ===== */
+/* ===== END MANUAL SUB-STAGE ACTUAL DATE MODE V20 ===== */
 
 async function bootstrapProjectTracker(){
   showLoginScreen();
