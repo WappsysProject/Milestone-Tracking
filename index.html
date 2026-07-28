@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
-  <title>Project Tracking Dashboard V22 - Team Dashboard</title>
+  <title>Project Tracking Dashboard V23 - Manual Actual Date Lock</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -418,7 +418,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V22 | Team-wise due dashboard linked with the project tracker</div>
+<div class="footer">Project Tracker V23 | Actual Dates are manual and hard-locked from task changes</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -488,6 +488,7 @@ function buildProjectGroupIndex(project){
   const groups=new Map();
   getWorkflowGroupBlueprint().forEach(group=>groups.set(group.key,{...group}));
   const tasksByGroup=new Map();
+
   (project?.tasks||[]).forEach((task,index)=>{
     const stage=task.stage||'Stage Not Updated';
     const sub=task.sub||'Sub-stage Not Updated';
@@ -496,6 +497,28 @@ function buildProjectGroupIndex(project){
     tasksByGroup.get(key).push(task);
     if(!groups.has(key)) groups.set(key,{key,stage,sub,order:WORKFLOW_TEMPLATE.length+index});
   });
+
+  // Keep sub-stages visible even when tasks are edited, moved or deleted.
+  // This prevents a manually entered date from appearing to disappear merely
+  // because a custom sub-stage temporarily has no task rows.
+  let rememberedOrder=WORKFLOW_TEMPLATE.length+(project?.tasks||[]).length;
+  Object.entries(project?.stageDates||{}).forEach(([storedKey,rec])=>{
+    if(!rec||typeof rec!=='object') return;
+    const stage=rec.stage||'Stage Not Updated';
+    const sub=rec.sub||'Sub-stage Not Updated';
+    const key=stageDateKey(stage,sub)||storedKey;
+    if(!groups.has(key)) groups.set(key,{key,stage,sub,order:rememberedOrder++});
+    if(!tasksByGroup.has(key)) tasksByGroup.set(key,[]);
+  });
+  Object.entries(project?.manualActualDates||{}).forEach(([storedKey,entry])=>{
+    if(!entry||typeof entry!=='object') return;
+    const stage=entry.stage||project?.stageDates?.[storedKey]?.stage||'Stage Not Updated';
+    const sub=entry.sub||project?.stageDates?.[storedKey]?.sub||'Sub-stage Not Updated';
+    const key=stageDateKey(stage,sub)||storedKey;
+    if(!groups.has(key)) groups.set(key,{key,stage,sub,order:rememberedOrder++});
+    if(!tasksByGroup.has(key)) tasksByGroup.set(key,[]);
+  });
+
   return {groups:[...groups.values()].sort((a,b)=>a.order-b.order),tasksByGroup};
 }
 function getProjectRuntime(project){
@@ -1024,6 +1047,110 @@ function canonicalTaskText(value){
 function stageDateKey(stage, sub){
   return `${canonicalTaskText(stage)}|||${canonicalTaskText(sub)}`;
 }
+
+/* ===== HARD-LOCKED MANUAL ACTUAL DATE STORE V21 =====
+   Actual Dates are user-owned data. Task status, task edits, task deletion,
+   rendering, migration and automatic completion logic are not allowed to
+   create, replace or clear them.
+*/
+function manualActualDateValue(entry){
+  if(entry&&typeof entry==='object') return normalizeDateForInput(entry.date)||'';
+  return normalizeDateForInput(entry)||'';
+}
+
+function ensureManualActualDateStore(project){
+  if(!project||typeof project!=='object') return {};
+  if(!project.manualActualDates||typeof project.manualActualDates!=='object'||Array.isArray(project.manualActualDates)){
+    project.manualActualDates={};
+  }
+  if(!project.stageDates||typeof project.stageDates!=='object'||Array.isArray(project.stageDates)){
+    project.stageDates={};
+  }
+
+  const store=project.manualActualDates;
+  Object.entries(project.stageDates).forEach(([key,rec])=>{
+    if(!rec||typeof rec!=='object') return;
+    const recordDate=normalizeDateForInput(rec.actualDate)||'';
+    const storedDate=manualActualDateValue(store[key]);
+
+    // First migration: every already-entered Actual Date becomes hard-locked.
+    if(!storedDate&&recordDate){
+      store[key]={
+        date:recordDate,
+        stage:rec.stage||'',
+        sub:rec.sub||'',
+        updatedAt:rec.actualDateUpdatedAt||new Date().toISOString(),
+        updatedBy:rec.actualDateUpdatedBy||'Existing saved value',
+        source:'manual-locked-v21'
+      };
+    }else if(storedDate&&store[key]&&typeof store[key]==='object'){
+      store[key].stage=store[key].stage||rec.stage||'';
+      store[key].sub=store[key].sub||rec.sub||'';
+      store[key].source='manual-locked-v21';
+    }
+  });
+  return store;
+}
+
+function restoreManualActualDates(project){
+  if(!project||typeof project!=='object') return false;
+  const store=ensureManualActualDateStore(project);
+  let changed=false;
+
+  Object.entries(store).forEach(([key,entry])=>{
+    const date=manualActualDateValue(entry);
+    if(!date) return;
+    const stage=(entry&&typeof entry==='object'&&entry.stage)||project.stageDates?.[key]?.stage||'Stage Not Updated';
+    const sub=(entry&&typeof entry==='object'&&entry.sub)||project.stageDates?.[key]?.sub||'Sub-stage Not Updated';
+    if(!project.stageDates[key]||typeof project.stageDates[key]!=='object'){
+      project.stageDates[key]={stage,sub,initialPlanningDate:'',actualDate:''};
+      changed=true;
+    }
+    const rec=project.stageDates[key];
+    if(rec.actualDate!==date){ rec.actualDate=date; changed=true; }
+    if(rec.actualDateSource!=='manual-locked-v21'){ rec.actualDateSource='manual-locked-v21'; changed=true; }
+    if(rec.actualDateReviewRequired){ rec.actualDateReviewRequired=false; changed=true; }
+    if(!rec.stage&&stage){ rec.stage=stage; changed=true; }
+    if(!rec.sub&&sub){ rec.sub=sub; changed=true; }
+    delete rec.actualDateEvidence;
+  });
+  return changed;
+}
+
+function setLockedManualActualDate(project,key,rec,date,updatedBy){
+  const store=ensureManualActualDateStore(project);
+  if(date){
+    store[key]={
+      date,
+      stage:rec.stage||'',
+      sub:rec.sub||'',
+      updatedAt:new Date().toISOString(),
+      updatedBy:updatedBy||'Unknown User',
+      source:'manual-locked-v21'
+    };
+    rec.actualDate=date;
+    rec.actualDateSource='manual-locked-v21';
+    rec.actualDateReviewRequired=false;
+    rec.actualDateUpdatedAt=store[key].updatedAt;
+    rec.actualDateUpdatedBy=store[key].updatedBy;
+    delete rec.actualDateEvidence;
+  }else{
+    // Clearing is allowed only through the manual Actual Date input.
+    delete store[key];
+    rec.actualDate='';
+    rec.actualDateSource='';
+    rec.actualDateReviewRequired=false;
+    rec.actualDateUpdatedAt=new Date().toISOString();
+    rec.actualDateUpdatedBy=updatedBy||'Unknown User';
+    delete rec.actualDateEvidence;
+  }
+}
+
+function protectManualActualDates(project){
+  // Call before and after any task mutation. It is intentionally idempotent.
+  ensureManualActualDateStore(project);
+  restoreManualActualDates(project);
+}
 function clearTaskLevelDateFields(task){
   if(!task) return;
   // Dates are now controlled only at stage/sub-stage level.
@@ -1039,8 +1166,14 @@ function getStageTasks(project,stage,sub){
 }
 function ensureStageDates(project){
   if(!project) return {};
-  if(stageDatePrepared.has(project) && project.stageDates && typeof project.stageDates==='object' && !Array.isArray(project.stageDates)) return project.stageDates;
+  if(stageDatePrepared.has(project) && project.stageDates && typeof project.stageDates==='object' && !Array.isArray(project.stageDates)){
+    restoreManualActualDates(project);
+    return project.stageDates;
+  }
   if(!project.stageDates || typeof project.stageDates!=='object' || Array.isArray(project.stageDates)) project.stageDates={};
+
+  // Capture all pre-existing Actual Dates before any task-level cleanup.
+  ensureManualActualDateStore(project);
 
   const index=buildProjectGroupIndex(project);
   index.groups.forEach(group=>{
@@ -1056,11 +1189,16 @@ function ensureStageDates(project){
       const dates=related.map(task=>normalizeDateForInput(task.initialPlanningDate||task.dueDate)).filter(Boolean).sort();
       if(dates.length) rec.initialPlanningDate=dates[0];
     }
-    if(!rec.actualDate){
+    // Legacy task Actual Dates may be migrated once, but after that the locked
+    // manual store is the sole authority and task updates cannot change it.
+    if(!rec.actualDate && !manualActualDateValue(project.manualActualDates?.[key])){
       const dates=related.map(task=>normalizeDateForInput(task.actualDate)).filter(Boolean).sort();
       if(dates.length) rec.actualDate=dates.at(-1);
     }
   });
+
+  ensureManualActualDateStore(project);
+  restoreManualActualDates(project);
   (project.tasks||[]).forEach(clearTaskLevelDateFields);
   stageDatePrepared.add(project);
   projectRuntimeCache.set(project,{...index,dateStates:new Map(),stats:null,currentStage:null,nextTask:null});
@@ -2010,8 +2148,9 @@ function openTaskForm(taskId){
 function autoAssignCurrentProject(){
   if(!requirePermission(canEditProject(),'Only Admin/PM can auto-assign owners.')) return;
   const project=db.projects.find(item=>item.id===currentProjectId); if(!project) return; let count=0;
+  protectManualActualDates(project);
   project.tasks.forEach(task=>{ const owner=defaultOwnerForDept(project,task.dept); if(owner&&task.owner!==owner){ const old=task.owner||''; task.owner=owner; task.lastUpdated=new Date().toISOString(); const detail=`Owner changed from "${old}" to "${owner}" based on department owner`; addHistory(task,'Auto-assigned',detail); addGlobalActivity(project,task,'Auto-assigned',detail); count++; } });
-  invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase(); alert(count+' tasks auto-assigned/updated.');
+  protectManualActualDates(project); invalidateProjectCache(project); scheduleActiveRender('project'); void persistDatabase(); alert(count+' tasks auto-assigned/updated.');
 }
 function showTaskHistory(taskId){
   const p=db.projects.find(x=>x.id===currentProjectId); const t=p.tasks.find(x=>x.id===taskId);
@@ -2024,8 +2163,9 @@ function deleteTask(id){
   if(!requirePermission(canDelete(),'Only Admin can delete tasks.')) return;
   if(!confirm('Delete this task?')) return;
   const project=db.projects.find(item=>item.id===currentProjectId); const task=project?.tasks.find(item=>item.id===id); if(!project||!task) return;
+  protectManualActualDates(project);
   const stage=task.stage,sub=task.sub; addGlobalActivity(project,task,'Task Deleted','Task deleted'); project.tasks=project.tasks.filter(item=>item.id!==id);
-  invalidateProjectCache(project,true); ensureStageDates(project); synchronizeSubStageActualDate(project,stage,sub); scheduleActiveRender('project'); void persistDatabase();
+  invalidateProjectCache(project,true); ensureStageDates(project); protectManualActualDates(project); scheduleActiveRender('project'); void persistDatabase();
 }
 async function deleteCurrentProject(){
   if(!requirePermission(canDelete(),'Only Admin can delete projects.')) return;
@@ -2849,7 +2989,11 @@ function synchronizeAllProjectDates(project){
 
 function prepareDatabaseForSave(){
   ensureUsers();
+  // Final write barrier: restore every locked manual Actual Date immediately
+  // before creating the browser/Firebase save payload.
+  (db.projects||[]).forEach(project=>protectManualActualDates(project));
   if(!db.meta||typeof db.meta!=='object') db.meta={};
+  db.meta.manualActualDateMode='manual-locked-v21';
   db.meta.updatedAt=new Date().toISOString(); db.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
 }
 
@@ -2927,6 +3071,7 @@ function clearActualDateBeforeReopen(project,stage,sub){
 function updateTaskField(projectId,taskId,field,value){
   const project=(db.projects||[]).find(item=>item.id===projectId); const task=(project?.tasks||[]).find(item=>item.id===taskId);
   if(!project||!task) return;
+  protectManualActualDates(project);
   if(!canEditTask(task)){ alert('You can only update tasks assigned to you.'); scheduleActiveRender('project'); return; }
   if(field==='owner'&&!canEditProject()){ alert('Only Admin/PM can change owner.'); scheduleActiveRender('project'); return; }
   if(field==='technicalTask') value=normalizeTechnicalTaskName(value);
@@ -2947,7 +3092,7 @@ function updateTaskField(projectId,taskId,field,value){
   task[field]=value; task.lastUpdated=new Date().toISOString();
   const detail=`${field} changed from "${oldValue}" to "${value}"`; addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail);
   invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
-  synchronizeSubStageActualDate(project,oldStage,oldSub); synchronizeSubStageActualDate(project,task.stage,task.sub);
+  protectManualActualDates(project);
   scheduleActiveRender('project'); void persistDatabase();
 }
 
@@ -2961,6 +3106,7 @@ function collectTaskFormData(){
 
 function saveTask(id){
   const project=(db.projects||[]).find(item=>item.id===currentProjectId); if(!project) return;
+  protectManualActualDates(project);
   const data=collectTaskFormData(); if(!data) return;
   if(id){
     const task=(project.tasks||[]).find(item=>item.id===id); if(!task) return;
@@ -2982,11 +3128,12 @@ function saveTask(id){
     const structural=task.stage!==data.stage||task.sub!==data.sub; Object.assign(task,data);
     if(changes.length){ const detail=changes.join('; '); addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail); }
     invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
-    synchronizeSubStageActualDate(project,oldStage,oldSub); synchronizeSubStageActualDate(project,task.stage,task.sub);
+    protectManualActualDates(project);
   }else{
     const task={id:uid(),...data,history:[]}; stampTaskDoneTransition(task,'To Do',task.status); addHistory(task,'Created','Task manually added'); project.tasks.push(task); addGlobalActivity(project,task,'Task Created','Task manually added');
-    invalidateProjectCache(project,true); ensureStageDates(project); synchronizeSubStageActualDate(project,task.stage,task.sub);
+    invalidateProjectCache(project,true); ensureStageDates(project); protectManualActualDates(project);
   }
+  protectManualActualDates(project);
   closeModal(); scheduleActiveRender('project'); void persistDatabase();
 }
 
@@ -3033,12 +3180,8 @@ function updateStageDate(projectId,key,field,value){
   const fieldLabel=field==='actualDate'?'Actual Date':'Planned Date';
 
   if(field==='actualDate'){
-    // Preserve the date as a manual value. No status or completion logic may overwrite it.
-    rec.actualDateSource=date?'manual-v20':'';
-    rec.actualDateReviewRequired=false;
-    rec.actualDateUpdatedAt=new Date().toISOString();
-    rec.actualDateUpdatedBy=updatedBy;
-    delete rec.actualDateEvidence;
+    // Only this manual input path is allowed to change the locked Actual Date.
+    setLockedManualActualDate(project,key,rec,date,updatedBy);
   }
 
   addGlobalActivity(
@@ -3058,6 +3201,7 @@ function renderStageDateTable(project){
   if(!table) return;
 
   ensureStageDates(project);
+  protectManualActualDates(project);
   const editable=canEditProject();
   const groups=getProjectRuntime(project).groups;
 
