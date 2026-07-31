@@ -410,7 +410,7 @@ Do not paste PASTE_HERE values anywhere.
 Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Review Repeated Tasks</button> <button class="primary" onclick="repairExistingRepeatedTasks()">Repair Existing Repeated Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Genuinely Missing Tasks</button><div class="lock-note" style="margin-top:10px"><b>V26 protection:</b> Saving or editing a task never runs workflow sync. Task name, stage, sub-stage and department may be edited while the permanent workflow ID remains unchanged.</div>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Review Repeated Tasks</button> <button class="danger" onclick="repairLiveFirebaseRepeatedWorkflowSets()">One-Time Live Firebase Cleanup</button> <button onclick="showSyncDisabledMessage()">Workflow Sync Locked</button><div class="lock-note" style="margin-top:10px"><b>V27 protection:</b> The cleanup runs directly against the latest Firebase data in one transaction. It detects complete workflow sets that were appended repeatedly—even when some rows were later edited—keeps the edited/most complete copy, archives every source row, and removes only the extra active rows. Project edits and task edits never create workflow tasks. Automatic template sync is locked.</div>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -1572,7 +1572,7 @@ function syncWorkflowTemplateToExistingProjects(){
       added++; projectAdded++;
     });
     if(projectAdded||projectIdsAssigned){
-      project.workflowTemplateVersion='V26';
+      project.workflowTemplateVersion='V27';
       project.workflowTemplateSyncedAt=new Date().toISOString();
       invalidateProjectCache(project,true);
       ensureStageDates(project);
@@ -1582,17 +1582,7 @@ function syncWorkflowTemplateToExistingProjects(){
 }
 
 function manualSyncWorkflowTemplate(){
-  if(!requirePermission(currentUserRole==="Admin","Only Admin can sync template tasks.")) return;
-  if(!confirm("Task editing never runs this sync. This separate Admin action will first protect existing tasks with permanent workflow IDs and then add only a small number of genuinely missing template tasks. If the tracker detects that a large part of the workflow appears missing, it will BLOCK the sync instead of recreating the full list. Continue?")) return;
-  normalizeDatabaseCollections();
-  const result=syncWorkflowTemplateToExistingProjects();
-  const message=[
-    result.idsAssigned ? `${result.idsAssigned} existing task(s) protected with permanent workflow IDs` : "No existing task IDs needed migration",
-    result.added ? `${result.added} genuinely missing template task(s) added` : "No genuine missing tasks were added",
-    result.blocked?.length ? `${result.blocked.length} project(s) blocked from unsafe bulk recreation:\n${result.blocked.map(item=>`• ${item.project}: ${item.missing} tasks appeared missing while ${item.existing} records already existed`).join("\n")}` : "No unsafe bulk recreation detected"
-  ].join(". ")+".";
-  alert(message);
-  if(result.added||result.idsAssigned) void persistDatabase({immediate:true});
+  showSyncDisabledMessage();
 }
 
 function findDuplicateTasks(project){
@@ -1671,13 +1661,42 @@ const DUPLICATE_MERGE_FIELDS=[
   "remarks","delayReason","doneAt","doneDate","doneBy","doneTimestampSource"
 ];
 
+function templateForWorkflowTask(task){
+  const workflowId=String(task?.workflowId||"").trim();
+  return workflowId ? WORKFLOW_TEMPLATE.find(item=>item.workflowId===workflowId) || null : null;
+}
+
+function taskHasIntentionalCoreEdit(task){
+  const template=templateForWorkflowTask(task);
+  if(template){
+    if(canonicalTaskText(task.stage)!==canonicalTaskText(template.stage)) return true;
+    if(canonicalTaskText(task.sub)!==canonicalTaskText(template.sub)) return true;
+    if(canonicalTaskText(task.dept)!==canonicalTaskText(template.dept)) return true;
+    if(canonicalTaskText(task.task)!==canonicalTaskText(template.task)) return true;
+  }
+  return (Array.isArray(task?.history)?task.history:[]).some(entry=>{
+    const action=canonicalTaskText(entry?.action||"");
+    const details=canonicalTaskText(entry?.details||"");
+    return action.includes("updated") && /(^| )(task|stage|sub stage|department)( |$)/.test(details);
+  });
+}
+
+function taskLatestMomentValue(task){
+  const candidates=[parseTaskTimestamp(task?.lastUpdated),parseTaskTimestamp(task?.doneAt)];
+  (Array.isArray(task?.history)?task.history:[]).forEach(entry=>candidates.push(historyEntryMoment(entry)));
+  const moments=candidates.filter(Boolean).map(date=>date.getTime()).filter(Number.isFinite);
+  return moments.length?Math.max(...moments):0;
+}
+
 function taskSurvivorScore(task){
   const statusRank={"To Do":0,"In Progress":1,"Done":2}[task?.status]||0;
   const populated=DUPLICATE_MERGE_FIELDS.filter(field=>meaningfulTaskValue(task?.[field])).length;
   const historyCount=Array.isArray(task?.history)?task.history.length:0;
+  const coreEditWeight=taskHasIntentionalCoreEdit(task)?500:0;
+  const latestWeight=Math.min(99,Math.floor(taskLatestMomentValue(task)/86400000)%100);
   const origin=taskOriginInfo(task).key;
-  const originWeight=origin==="original-template"?8:origin==="manual"?6:origin==="updated-template"?4:2;
-  return statusRank*100+populated*8+historyCount*2+originWeight;
+  const originWeight=origin==="manual"?12:origin==="updated-template"?8:origin==="original-template"?4:2;
+  return coreEditWeight+statusRank*180+populated*10+historyCount*3+latestWeight+originWeight;
 }
 
 function uniqueHistoryEntries(entries){
@@ -1733,6 +1752,16 @@ function mergeDuplicateGroup(project,group,batchId){
           keptValue:current,
           preservedValue:incoming
         });
+      }
+    });
+    // Preserve any custom/MIS field introduced by an older or newer build.
+    Object.keys(duplicate||{}).forEach(field=>{
+      if(["id","history","stage","sub","dept","task","status","lastUpdated","remarks","delayReason","mergeConflicts","mergedTaskIds"].includes(field)) return;
+      if(DUPLICATE_MERGE_FIELDS.includes(field)) return;
+      const incoming=duplicate[field],current=survivor[field];
+      if(!meaningfulTaskValue(current)&&meaningfulTaskValue(incoming)) survivor[field]=incoming;
+      else if(meaningfulTaskValue(current)&&meaningfulTaskValue(incoming)&&JSON.stringify(current)!==JSON.stringify(incoming)){
+        survivor.mergeConflicts.push({mergedAt:new Date().toISOString(),sourceTaskId:duplicate.id||"",field,keptValue:current,preservedValue:incoming});
       }
     });
     combineNarrativeField(survivor,duplicate,"remarks");
@@ -1889,6 +1918,213 @@ function safeMergeDuplicateTasks(){
     else alert(`Duplicates were consolidated in this browser, but Firebase did not confirm the save. The downloaded backup is safe. Refresh and retry after resolving the save conflict.`);
   });
 }
+
+
+/* ===== V27 LIVE FIREBASE FULL-SET CLEANUP ===== */
+function showSyncDisabledMessage(){
+  alert("Automatic workflow synchronization is locked in V27. Editing a project or task never creates tasks. A genuinely new workflow task must be added through a controlled code/template release with a new permanent workflowId.");
+}
+
+function taskCreatedHistoryEntry(task){
+  return (Array.isArray(task?.history)?task.history:[]).find(entry=>canonicalTaskText(entry?.action||"")==="created") || null;
+}
+
+function taskCreationBatchKey(task){
+  const entry=taskCreatedHistoryEntry(task);
+  if(!entry) return "";
+  const details=canonicalTaskText(entry.details||"");
+  if(!details.includes("workflow template")) return "";
+  return `${String(entry.at||"").trim()}|||${details.includes("updated workflow template")?"updated":"original"}`;
+}
+
+function exactTemplateIndex(task){
+  const id=String(task?.workflowId||"").trim();
+  if(id){
+    const index=WORKFLOW_TEMPLATE.findIndex(item=>item.workflowId===id);
+    if(index>=0) return index;
+  }
+  const key=legacyTemplateTaskKey(task);
+  return WORKFLOW_TEMPLATE.findIndex(item=>legacyTemplateTaskKey(item)===key);
+}
+
+function assignSequenceToTemplate(tasks){
+  if(!Array.isArray(tasks)||!tasks.length) return 0;
+  let assigned=0,cursor=0;
+  tasks.forEach((task,position)=>{
+    if(!task||typeof task!=="object") return;
+    const exact=exactTemplateIndex(task);
+    if(exact>=0){
+      if(!task.workflowId){ task.workflowId=WORKFLOW_TEMPLATE[exact].workflowId; assigned++; }
+      cursor=Math.max(cursor,exact+1);
+      return;
+    }
+    // Repeated workflow batches retain template order. Position is therefore the
+    // strongest recovery signal for an edited row whose wording no longer matches.
+    const proportional=Math.round(position*(WORKFLOW_TEMPLATE.length-1)/Math.max(1,tasks.length-1));
+    const projected=Math.min(WORKFLOW_TEMPLATE.length-1,Math.max(cursor,proportional));
+    const start=Math.max(cursor,projected-8),end=Math.min(WORKFLOW_TEMPLATE.length-1,projected+10);
+    let best=null;
+    for(let index=start;index<=end;index++){
+      const template=WORKFLOW_TEMPLATE[index];
+      let score=0;
+      if(canonicalTaskText(task.stage)===canonicalTaskText(template.stage)) score+=0.22;
+      if(canonicalTaskText(task.sub)===canonicalTaskText(template.sub)) score+=0.28;
+      if(canonicalTaskText(task.dept)===canonicalTaskText(template.dept)) score+=0.20;
+      score+=taskTextSimilarity(task.task,template.task)*0.42;
+      score-=Math.abs(index-projected)*0.012;
+      if(!best||score>best.score) best={index,score};
+    }
+    if(best&&best.score>=0.58){
+      task.workflowId=WORKFLOW_TEMPLATE[best.index].workflowId;
+      assigned++; cursor=best.index+1;
+    }
+  });
+  return assigned;
+}
+
+function repeatedTemplateStartIndices(tasks){
+  const firstKey=legacyTemplateTaskKey(WORKFLOW_TEMPLATE[0]);
+  const secondKey=legacyTemplateTaskKey(WORKFLOW_TEMPLATE[1]);
+  const thirdKey=legacyTemplateTaskKey(WORKFLOW_TEMPLATE[2]);
+  const starts=[];
+  tasks.forEach((task,index)=>{
+    if(legacyTemplateTaskKey(task)!==firstKey) return;
+    const nearby=tasks.slice(index+1,index+8).map(legacyTemplateTaskKey);
+    if(nearby.includes(secondKey)||nearby.includes(thirdKey)) starts.push(index);
+  });
+  return starts;
+}
+
+function assignWorkflowIdsFromRepeatedSets(project){
+  if(!project||!Array.isArray(project.tasks)) return 0;
+  let assigned=ensureWorkflowIdsForProject(project);
+  const templateSize=WORKFLOW_TEMPLATE.length;
+  const batches=new Map();
+  project.tasks.forEach((task,index)=>{
+    const key=taskCreationBatchKey(task);
+    if(!key) return;
+    if(!batches.has(key)) batches.set(key,[]);
+    batches.get(key).push({task,index});
+  });
+  batches.forEach(items=>{
+    const exactCount=items.filter(item=>exactTemplateIndex(item.task)>=0).length;
+    if(items.length>=Math.floor(templateSize*0.55)||exactCount>=Math.floor(templateSize*0.45)){
+      assigned+=assignSequenceToTemplate(items.sort((a,b)=>a.index-b.index).map(item=>item.task));
+    }
+  });
+
+  // Fallback for older projects whose Created history is absent: repeated full lists
+  // are normally appended as contiguous sequences beginning with the first workflow task.
+  const starts=repeatedTemplateStartIndices(project.tasks);
+  if(starts.length>=2){
+    starts.forEach((start,idx)=>{
+      const end=idx+1<starts.length?starts[idx+1]:Math.min(project.tasks.length,start+Math.ceil(templateSize*1.25));
+      const segment=project.tasks.slice(start,end);
+      if(segment.length>=Math.floor(templateSize*0.55)) assigned+=assignSequenceToTemplate(segment);
+    });
+  }
+  return assigned;
+}
+
+function fullSetDuplicateStats(database){
+  const projects=Array.isArray(database?.projects)?database.projects:firebaseCollectionToArray(database?.projects);
+  let tasks=0,groups=0,extras=0,projectsAffected=0;
+  projects.forEach(project=>{
+    const projectTasks=Array.isArray(project?.tasks)?project.tasks:firebaseCollectionToArray(project?.tasks);
+    tasks+=projectTasks.length;
+    const localProject={...project,tasks:projectTasks};
+    const duplicateGroups=findDuplicateTasks(localProject);
+    if(duplicateGroups.length) projectsAffected++;
+    groups+=duplicateGroups.length;
+    extras+=duplicateGroups.reduce((sum,group)=>sum+group.length-1,0);
+  });
+  return {projects:projects.length,tasks,groups,extras,projectsAffected};
+}
+
+function executeFullSetCleanupOnDatabase(database,batchId){
+  const previousDb=db;
+  db=database&&typeof database==="object"?database:{projects:[],activity:[],users:{},meta:{}};
+  try{
+    normalizeDatabaseCollections();
+    let idsAssigned=0,removed=0,affectedProjects=0;
+    (db.projects||[]).forEach(project=>{
+      idsAssigned+=assignWorkflowIdsFromRepeatedSets(project);
+      const groups=findDuplicateTasks(project);
+      if(!groups.length) return;
+      affectedProjects++;
+      protectManualActualDates(project);
+      groups.forEach(group=>{ removed+=mergeDuplicateGroup(project,group,batchId); });
+      invalidateProjectCache(project,true); ensureStageDates(project); protectManualActualDates(project);
+    });
+    if(!db.meta||typeof db.meta!=="object") db.meta={};
+    db.meta.workflowIdentityMode="stable-id-v27";
+    db.meta.automaticWorkflowSync="locked-v27";
+    db.meta.fullSetCleanupAt=new Date().toISOString();
+    db.meta.fullSetCleanupBy=currentUserEmail||currentUser||"Unknown User";
+    db.meta.fullSetCleanupBatchId=batchId;
+    return {database:db,idsAssigned,removed,affectedProjects,after:fullSetDuplicateStats(db)};
+  }finally{
+    db=previousDb;
+  }
+}
+
+async function repairLiveFirebaseRepeatedWorkflowSets(){
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can run the live Firebase cleanup.")) return;
+  if(!(firebaseReady&&firebaseDBRef&&firebase.auth().currentUser)){
+    alert("Firebase is not connected. The live cleanup was not started, and no data was changed."); return;
+  }
+  const buttonText="One-Time Live Firebase Cleanup";
+  try{
+    const remoteSnapshot=await firebaseDBRef.once("value");
+    const remoteData=remoteSnapshot.val();
+    if(!remoteData){ alert("No Firebase project data was found."); return; }
+    const untouched=typeof structuredClone==="function"?structuredClone(remoteData):JSON.parse(JSON.stringify(remoteData));
+    const previewData=typeof structuredClone==="function"?structuredClone(remoteData):JSON.parse(JSON.stringify(remoteData));
+    const preview=executeFullSetCleanupOnDatabase(previewData,`PREVIEW-${Date.now()}`);
+    const before=fullSetDuplicateStats(untouched);
+    if(!preview.removed){
+      alert(`No removable repeated workflow rows were detected in the latest Firebase snapshot. Firebase currently contains ${before.tasks} task rows across ${before.projects} projects. Download and share the JSON backup for a project-specific review if repeated rows are still visible.`);
+      return;
+    }
+    const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+    downloadFile(`LIVE-FIREBASE-BACKUP-before-full-set-cleanup-${stamp}.json`,JSON.stringify(untouched,null,2),"application/json");
+    const ok=confirm(`The latest Firebase data contains ${before.tasks} task rows. V27 can consolidate ${preview.removed} repeated row(s) across ${preview.affectedProjects} project(s).\n\nAll original rows will be retained inside duplicateMergeArchive and a complete Firebase backup has already been downloaded.\n\nContinue with the live Firebase transaction?`);
+    if(!ok) return;
+    const batchId=`LIVE-DEDUP-${Date.now()}`;
+    const result=await new Promise(resolve=>{
+      let settled=false;
+      const finish=value=>{ if(settled)return; settled=true; clearTimeout(timer); resolve(value); };
+      const timer=setTimeout(()=>finish({ok:false,timeout:true,error:new Error("Live cleanup timed out")}),30000);
+      firebaseDBRef.transaction(current=>{
+        if(!current||typeof current!=="object") return;
+        const next=typeof structuredClone==="function"?structuredClone(current):JSON.parse(JSON.stringify(current));
+        const cleaned=executeFullSetCleanupOnDatabase(next,batchId);
+        if(!cleaned.database.meta||typeof cleaned.database.meta!=="object") cleaned.database.meta={};
+        cleaned.database.meta.revision=Number(current?.meta?.revision||0)+1;
+        cleaned.database.meta.updatedAt=new Date().toISOString();
+        cleaned.database.meta.updatedBy=currentUserEmail||currentUser||"Unknown User";
+        cleaned.database.meta.lastFullSetRowsRemoved=cleaned.removed;
+        cleaned.database.meta.lastFullSetIdsAssigned=cleaned.idsAssigned;
+        return cleaned.database;
+      },(error,committed,snapshot)=>{
+        if(error){ finish({ok:false,error}); return; }
+        if(!committed){ finish({ok:false,error:new Error("Firebase did not commit the cleanup")}); return; }
+        finish({ok:true,data:snapshot.val()});
+      },false);
+    });
+    if(!result.ok){
+      alert(result.timeout?"Firebase did not respond in time. No confirmed cleanup was completed. The downloaded backup remains safe.":`Firebase cleanup failed: ${result.error?.message||"Unknown error"}`);
+      return;
+    }
+    applyRemoteDatabase(result.data); remoteSnapshotSeen=true; saveLocalBackup(); scheduleActiveRender();
+    const after=fullSetDuplicateStats(db);
+    alert(`Live Firebase cleanup completed. Active task rows reduced from ${before.tasks} to ${after.tasks}. ${before.tasks-after.tasks} repeated row(s) were removed from the active projects. Every original row remains recoverable in duplicateMergeArchive.`);
+  }catch(error){
+    console.error("Live Firebase full-set cleanup failed",error);
+    alert(`Live Firebase cleanup could not be completed: ${error?.message||"Unknown error"}. No confirmed data change was made.`);
+  }
+}
+/* ===== END V27 LIVE FIREBASE FULL-SET CLEANUP ===== */
 
 let dbListenerStarted = false;
 let dbSeedingUsers = false;
@@ -3439,8 +3675,9 @@ function prepareDatabaseForSave(){
   (db.projects||[]).forEach(project=>protectManualActualDates(project));
   if(!db.meta||typeof db.meta!=='object') db.meta={};
   db.meta.manualActualDateMode='manual-locked-v21';
-  db.meta.workflowIdentityMode='stable-id-v26';
-  db.meta.editCannotTriggerWorkflowSync='enabled-v26';
+  db.meta.workflowIdentityMode='stable-id-v27';
+  db.meta.editCannotTriggerWorkflowSync='enabled-v27';
+  db.meta.automaticWorkflowSync='locked-v27';
   db.meta.fullTaskRecreationGuard='enabled-v25';
   db.meta.updatedAt=new Date().toISOString(); db.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
 }
