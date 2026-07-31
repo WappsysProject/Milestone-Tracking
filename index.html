@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
-  <title>Project Tracking Dashboard V23 - Manual Actual Date Lock</title>
+  <title>Project Tracking Dashboard V26 - Edit-Safe No Task Recreation</title>
   <style>
     :root{
       --bg:#f6f8fb; --card:#ffffff; --text:#1f2937; --muted:#6b7280; --border:#d9e0ea;
@@ -410,7 +410,7 @@ Do not paste PASTE_HERE values anywhere.
 Passwords are managed only in Firebase Authentication.
 Realtime Database path used by this tracker: projectTrackerDB.</div>
         <p class="muted">Current mode: <b id="storageMode">Firebase Shared Database</b></p>
-        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Check Duplicate Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Missing Template Tasks</button>
+        <button class="blue" onclick="downloadBackup()">Download JSON Backup</button> <button class="primary" onclick="testFirebaseWrite()">Test Firebase Write</button> <button onclick="showDuplicateTaskReport()">Review Repeated Tasks</button> <button class="primary" onclick="repairExistingRepeatedTasks()">Repair Existing Repeated Tasks</button> <button onclick="manualSyncWorkflowTemplate()">Sync Genuinely Missing Tasks</button><div class="lock-note" style="margin-top:10px"><b>V26 protection:</b> Saving or editing a task never runs workflow sync. Task name, stage, sub-stage and department may be edited while the permanent workflow ID remains unchanged.</div>
         <label style="margin-top:14px">Restore JSON Backup</label>
         <input type="file" accept=".json" onchange="restoreBackup(event)"/>
       </div>
@@ -418,7 +418,7 @@ Realtime Database path used by this tracker: projectTrackerDB.</div>
   </section>
 </div>
 
-<div class="footer">Project Tracker V23 | Actual Dates are manual and hard-locked from task changes</div>
+<div class="footer">Project Tracker V26 | Task edits cannot recreate workflow tasks | Lossless duplicate repair</div>
 
 <div id="modal" class="hidden" style="position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:50;display:flex;align-items:center;justify-content:center;padding:20px">
   <div class="card" style="max-width:900px;width:100%;max-height:90vh;overflow:auto">
@@ -783,172 +783,172 @@ function addOrUpdateUser(){
 }
 
 const WORKFLOW_TEMPLATE = [
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Order scrutiny and get the final order"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Ask client for BG format"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Allotment of job code"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Handover from sales and contracts to projects", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Approved Costing Sheet", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Scope of project discussion with sales and contract along with project team", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Purchase Team", task:"Material cost checking during approval"},
-  {stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Projects Team", task:"Scope of project discussion with sales and contract"},
+  {workflowId:"WF-001", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Order scrutiny and get the final order"},
+  {workflowId:"WF-002", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Ask client for BG format"},
+  {workflowId:"WF-003", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Contracts & Commercial", task:"Allotment of job code"},
+  {workflowId:"WF-004", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Handover from sales and contracts to projects", technicalTask:"Process Team"},
+  {workflowId:"WF-005", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Approved Costing Sheet", technicalTask:"Process Team"},
+  {workflowId:"WF-006", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Technical Team", task:"Scope of project discussion with sales and contract along with project team", technicalTask:"Process Team"},
+  {workflowId:"WF-007", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Purchase Team", task:"Material cost checking during approval"},
+  {workflowId:"WF-008", stage:"Planning Stage", sub:"Handing over from sales and contracts to projects", dept:"Projects Team", task:"Scope of project discussion with sales and contract"},
 
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Finalization of obligations / scope on TrueCounsel"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"BG / insurance coordination and other formalities for claiming advance"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Initial financial closure"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Technical Team", task:"Fill Data Gaps and brief to all technical (Process, Detail Engineering & E&I team) & Project team", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"Initial RMC cost"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First delivery feedback"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First review of makes"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Site visit MOM and kick-off meeting"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Initial planning of schedule, org structure and escalation matrix"},
-  {stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Prepare document control sheet"},
+  {workflowId:"WF-009", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Finalization of obligations / scope on TrueCounsel"},
+  {workflowId:"WF-010", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"BG / insurance coordination and other formalities for claiming advance"},
+  {workflowId:"WF-011", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Contracts & Commercial", task:"Initial financial closure"},
+  {workflowId:"WF-012", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Technical Team", task:"Fill Data Gaps and brief to all technical (Process, Detail Engineering & E&I team) & Project team", technicalTask:"Process Team"},
+  {workflowId:"WF-013", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"Initial RMC cost"},
+  {workflowId:"WF-014", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First delivery feedback"},
+  {workflowId:"WF-015", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Purchase Team", task:"First review of makes"},
+  {workflowId:"WF-016", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Site visit MOM and kick-off meeting"},
+  {workflowId:"WF-017", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Initial planning of schedule, org structure and escalation matrix"},
+  {workflowId:"WF-018", stage:"Planning Stage", sub:"Initial Closure / Kick Off Meeting / Site Visit", dept:"Projects Team", task:"Prepare document control sheet"},
 
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Appoint project manager from HO team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Macro billing plan"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"TrueCounsel review for complete obligations"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Scheme & Design Submission", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Design Calculations", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"TDS Preparation after cost comparison of various make", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"P&ID", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Control Philosophy", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 1", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client scope finalisation with Quality control", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GA & SLD with Load List", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval - Panel Foundation", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Panel Foundation", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Cable Tray Layout", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Automation Logic", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Note for Transition Team", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Submittals / Approval", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Site Visit if Required", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Technical Review Agenda", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Initial Note with Costing for Internal Approval", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3A Preparation", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Electrical Submittal / Approval", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3B Preparation", technicalTask:"Electrical Team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Indent-wise budget review with design team to finalise and optimise indents"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Tank procurement decision based on key stakeholder inputs"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Critical technical/site inputs and feedback before final budget and vendor visit"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Make-related discussion for best cost optimisation"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Checking indents and make related discussion for cost optimization"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Site expense budget for initial closure"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Documentation preparation"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Coordination with technical team based on site/customer requirement"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Understand engineering drawings and critical quality control points"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Client scope finalisation with quality control and technical team"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Understand client formats for documentation"},
-  {stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Execution drawings to be checked with client and other services"},
+  {workflowId:"WF-019", stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Appoint project manager from HO team"},
+  {workflowId:"WF-020", stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"Macro billing plan"},
+  {workflowId:"WF-021", stage:"Planning Stage", sub:"Engineering Closure", dept:"Contracts & Commercial", task:"TrueCounsel review for complete obligations"},
+  {workflowId:"WF-022", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Scheme & Design Submission", technicalTask:"Process Team"},
+  {workflowId:"WF-023", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Design Calculations", technicalTask:"Process Team"},
+  {workflowId:"WF-024", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"TDS Preparation after cost comparison of various make", technicalTask:"Process Team"},
+  {workflowId:"WF-025", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"P&ID", technicalTask:"Process Team"},
+  {workflowId:"WF-026", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Plan & Section", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-027", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval", technicalTask:"Process Team"},
+  {workflowId:"WF-028", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Control Philosophy", technicalTask:"Process Team"},
+  {workflowId:"WF-029", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 1", technicalTask:"Process Team"},
+  {workflowId:"WF-030", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GFC & Structural Design / Fabrication Drawing", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-031", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client scope finalisation with Quality control", technicalTask:"Process Team"},
+  {workflowId:"WF-032", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"GA & SLD with Load List", technicalTask:"Electrical Team"},
+  {workflowId:"WF-033", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Client Approval - Panel Foundation", technicalTask:"Process Team"},
+  {workflowId:"WF-034", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Panel Foundation", technicalTask:"Electrical Team"},
+  {workflowId:"WF-035", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Piping Layout", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-036", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Cable Tray Layout", technicalTask:"Electrical Team"},
+  {workflowId:"WF-037", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indents 2, 4, 5 and 3", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-038", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Automation Logic", technicalTask:"Electrical Team"},
+  {workflowId:"WF-039", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Note for Transition Team", technicalTask:"Process Team"},
+  {workflowId:"WF-040", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points and Quality Control Measures (drawings & material)", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-041", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Submittals / Approval", technicalTask:"Process Team"},
+  {workflowId:"WF-042", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Site Visit if Required", technicalTask:"Process Team"},
+  {workflowId:"WF-043", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Technical Review Agenda", technicalTask:"Process Team"},
+  {workflowId:"WF-044", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Detailed Engineering Review", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-045", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Drawings Submittals & Approval", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-046", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Critical Points Related to Installation", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-047", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Initial Note with Costing for Internal Approval", technicalTask:"Electrical Team"},
+  {workflowId:"WF-048", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3A Preparation", technicalTask:"Electrical Team"},
+  {workflowId:"WF-049", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Electrical Submittal / Approval", technicalTask:"Electrical Team"},
+  {workflowId:"WF-050", stage:"Planning Stage", sub:"Engineering Closure", dept:"Technical Team", task:"Indent 3B Preparation", technicalTask:"Electrical Team"},
+  {workflowId:"WF-051", stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Indent-wise budget review with design team to finalise and optimise indents"},
+  {workflowId:"WF-052", stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Tank procurement decision based on key stakeholder inputs"},
+  {workflowId:"WF-053", stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Critical technical/site inputs and feedback before final budget and vendor visit"},
+  {workflowId:"WF-054", stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Make-related discussion for best cost optimisation"},
+  {workflowId:"WF-055", stage:"Planning Stage", sub:"Engineering Closure", dept:"Purchase Team", task:"Checking indents and make related discussion for cost optimization"},
+  {workflowId:"WF-056", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Site expense budget for initial closure"},
+  {workflowId:"WF-057", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Documentation preparation"},
+  {workflowId:"WF-058", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Coordination with technical team based on site/customer requirement"},
+  {workflowId:"WF-059", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Understand engineering drawings and critical quality control points"},
+  {workflowId:"WF-060", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Client scope finalisation with quality control and technical team"},
+  {workflowId:"WF-061", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Understand client formats for documentation"},
+  {workflowId:"WF-062", stage:"Planning Stage", sub:"Engineering Closure", dept:"Projects Team", task:"Execution drawings to be checked with client and other services"},
 
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Final budget and schedule signed off"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Budget Review"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Schedule Review"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Billing Plan Review"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Micro Billing Plan"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Understand RA bill formats and billing procedure"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement plan, logistics plan and ordering long delivery items"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Final Closure"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement Plan"},
-  {stage:"Planning Stage", sub:"Final Financial Closure", dept:"Projects Team", task:"Site expense budget, contractor budget, procurement/logistics approval and project tracking"},
+  {workflowId:"WF-063", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Final budget and schedule signed off"},
+  {workflowId:"WF-064", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Budget Review"},
+  {workflowId:"WF-065", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Schedule Review"},
+  {workflowId:"WF-066", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Contracts & Commercial", task:"Billing Plan Review"},
+  {workflowId:"WF-067", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Micro Billing Plan"},
+  {workflowId:"WF-068", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Billing", task:"Understand RA bill formats and billing procedure"},
+  {workflowId:"WF-069", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Technical Team", task:"Micro Billing Schedule with short, increase & decrease of Qty, extra item possibility", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-070", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement plan, logistics plan and ordering long delivery items"},
+  {workflowId:"WF-071", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Final Closure"},
+  {workflowId:"WF-072", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Purchase Team", task:"Procurement Plan"},
+  {workflowId:"WF-073", stage:"Planning Stage", sub:"Final Financial Closure", dept:"Projects Team", task:"Site expense budget, contractor budget, procurement/logistics approval and project tracking"},
 
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Contracts & Commercial", task:"Oversee site mobilisation preparation and ensure client cashflow is available"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Final TDS / Inputs", technicalTask:"Process Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Site mobilization file checking and training to site person"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering Go-Ahead to Purchase"},
-  {stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Billing", task:"Document Submission (BG, ABG, PBG, RBG, CAR, WC)"},
+  {workflowId:"WF-074", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Contracts & Commercial", task:"Oversee site mobilisation preparation and ensure client cashflow is available"},
+  {workflowId:"WF-075", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Final TDS / Inputs", technicalTask:"Process Team"},
+  {workflowId:"WF-076", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Site Mobilization File to be handed over to projects & close loop with transition team too", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-077", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Technical Team", task:"Quality Control of Client Work (Review)", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-078", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering, vendor coordination, material tracking, inspections, payments and final logistics plan"},
+  {workflowId:"WF-079", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Store preparation, accommodation/logistics, civil de-snagging visit, quality control and contractor finalisation"},
+  {workflowId:"WF-080", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Projects Team", task:"Site mobilization file checking and training to site person"},
+  {workflowId:"WF-081", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Purchase Team", task:"Ordering Go-Ahead to Purchase"},
+  {workflowId:"WF-082", stage:"Planning Stage", sub:"Ordering Go Ahead & Site Mobilization Preparation", dept:"Billing", task:"Document Submission (BG, ABG, PBG, RBG, CAR, WC)"},
 
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Contracts & Commercial", task:"Check E-way bill, RA bill and related documents as per site requirement"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Engg. Team"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"TCs, challans, vendor coordination and material dispatch tracking"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"Logistic / Dispatch Plan"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"QC / Test Certificates"},
-  {stage:"Planning Stage", sub:"Material Dispatch", dept:"Projects Team", task:"Verify site mobilisation file, budget, MIR documents, material receipt and security"},
+  {workflowId:"WF-083", stage:"Planning Stage", sub:"Material Dispatch", dept:"Contracts & Commercial", task:"Check E-way bill, RA bill and related documents as per site requirement"},
+  {workflowId:"WF-084", stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Over see how material is packed and dispatch", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-085", stage:"Planning Stage", sub:"Material Dispatch", dept:"Technical Team", task:"Quality Control", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-086", stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"TCs, challans, vendor coordination and material dispatch tracking"},
+  {workflowId:"WF-087", stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"Logistic / Dispatch Plan"},
+  {workflowId:"WF-088", stage:"Planning Stage", sub:"Material Dispatch", dept:"Purchase Team", task:"QC / Test Certificates"},
+  {workflowId:"WF-089", stage:"Planning Stage", sub:"Material Dispatch", dept:"Projects Team", task:"Verify site mobilisation file, budget, MIR documents, material receipt and security"},
 
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Contracts & Commercial", task:"Review site expense budget and closure plan"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Any deviation with TDS related to E&I", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Purchase Team", task:"Review pending material/order and logistics with projects"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Final check of client work, status and snags"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Gate pass and billing document approvals"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Contractor and site engineer reaching site"},
-  {stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"KOM with design, project owner and site owner"},
+  {workflowId:"WF-090", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Contracts & Commercial", task:"Review site expense budget and closure plan"},
+  {workflowId:"WF-091", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Check the qualification of site team & Critical Inputs should be provided", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-092", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Panel foundation need to check", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-093", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Technical Team", task:"Any deviation with TDS related to E&I", technicalTask:"Electrical Team"},
+  {workflowId:"WF-094", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Purchase Team", task:"Review pending material/order and logistics with projects"},
+  {workflowId:"WF-095", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Final check of client work, status and snags"},
+  {workflowId:"WF-096", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Gate pass and billing document approvals"},
+  {workflowId:"WF-097", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"Contractor and site engineer reaching site"},
+  {workflowId:"WF-098", stage:"Execution Stage", sub:"Site Mobilisation", dept:"Projects Team", task:"KOM with design, project owner and site owner"},
 
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing setup / expense controls"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget escalations / extra item"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget and schedule control"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Client feedback"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing and collection"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Purchase Team", task:"Share vendor visit details and supply material for indents"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Execution start"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Set quality control procedures and welding list"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Manufacturing / Testing", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Tracker Update"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Escalation if any"},
-  {stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Billing", task:"Collection"},
+  {workflowId:"WF-099", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing setup / expense controls"},
+  {workflowId:"WF-100", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget escalations / extra item"},
+  {workflowId:"WF-101", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Budget and schedule control"},
+  {workflowId:"WF-102", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Client feedback"},
+  {workflowId:"WF-103", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Billing and collection"},
+  {workflowId:"WF-104", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Execution Go-Ahead", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-105", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Purchase Team", task:"Share vendor visit details and supply material for indents"},
+  {workflowId:"WF-106", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Execution start"},
+  {workflowId:"WF-107", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Set quality control procedures and welding list"},
+  {workflowId:"WF-108", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Technical Team", task:"Manufacturing / Testing", technicalTask:"Electrical Team"},
+  {workflowId:"WF-109", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Projects Team", task:"Tracker Update"},
+  {workflowId:"WF-110", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Contracts & Commercial", task:"Escalation if any"},
+  {workflowId:"WF-111", stage:"Execution Stage", sub:"Execution Go Ahead", dept:"Billing", task:"Collection"},
 
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit / Quality Check", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Completion certification from the transition team", technicalTask:"Project Team"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Vendor visit list and coordination"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Supply material of indent 6"},
-  {stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Projects Team", task:"De-snagging, transition team visit, indent 7/8, optional QC visit and demobilisation control"},
+  {workflowId:"WF-112", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-113", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Check indent 6 and approve", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-114", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Indent 6 Approval", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-115", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Site Visit / Quality Check", technicalTask:"Electrical Team"},
+  {workflowId:"WF-116", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Contractor demobilisation should be strictly after virtual completion certification", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-117", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Technical Team", task:"Completion certification from the transition team", technicalTask:"Project Team"},
+  {workflowId:"WF-118", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Vendor visit list and coordination"},
+  {workflowId:"WF-119", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Purchase Team", task:"Supply material of indent 6"},
+  {workflowId:"WF-120", stage:"Execution Stage", sub:"Quality Control Visit & Indent 6 Finalization", dept:"Projects Team", task:"De-snagging, transition team visit, indent 7/8, optional QC visit and demobilisation control"},
 
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Contracts & Commercial", task:"Electrical budget if any deviation"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Engg. Team"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Measuring of electrical progress", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Panel Started as per approved TDS", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"PLC Programming & Automation Testing", technicalTask:"Electrical Team"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Purchase Team", task:"Any pending items for indent 3"},
-  {stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Projects Team", task:"De-snagging of mechanical work"},
+  {workflowId:"WF-121", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Contracts & Commercial", task:"Electrical budget if any deviation"},
+  {workflowId:"WF-122", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Checking of mechanical work", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-123", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Measuring of electrical progress", technicalTask:"Electrical Team"},
+  {workflowId:"WF-124", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"Panel Started as per approved TDS", technicalTask:"Electrical Team"},
+  {workflowId:"WF-125", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Technical Team", task:"PLC Programming & Automation Testing", technicalTask:"Electrical Team"},
+  {workflowId:"WF-126", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Purchase Team", task:"Any pending items for indent 3"},
+  {workflowId:"WF-127", stage:"Execution Stage", sub:"Mechanical work completion and start of electrical works", dept:"Projects Team", task:"De-snagging of mechanical work"},
 
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Checklist Approval (Dry/Wet Run)", technicalTask:"Process Team"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Electrical checklist (Continuity, rotation, Ampere)", technicalTask:"Electrical Team"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Sites - Dry Run / Wet Run Go-Ahead", technicalTask:"Electrical Team"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"SOP / O&M Manual Preparation", technicalTask:"Process Team"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Purchase Team", task:"Provide vendor support/manuals if required and indent 7-8"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Projects Team", task:"Transition team snag list, indent 7-8, dry/wet run, testing & commissioning and HOTO document"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Projects Team", task:"Documents (QAP, WMS, MIR, O&M Manuals)"},
-  {stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Transition Team", task:"Snag points / modification if any"},
+  {workflowId:"WF-128", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Contracts & Commercial", task:"Billing and collections, client feedback and balance material"},
+  {workflowId:"WF-129", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Indent 7-8", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-130", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Checklist Approval (Dry/Wet Run)", technicalTask:"Process Team"},
+  {workflowId:"WF-131", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Electrical checklist (Continuity, rotation, Ampere)", technicalTask:"Electrical Team"},
+  {workflowId:"WF-132", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"Sites - Dry Run / Wet Run Go-Ahead", technicalTask:"Electrical Team"},
+  {workflowId:"WF-133", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Technical Team", task:"SOP / O&M Manual Preparation", technicalTask:"Process Team"},
+  {workflowId:"WF-134", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Purchase Team", task:"Provide vendor support/manuals if required and indent 7-8"},
+  {workflowId:"WF-135", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Projects Team", task:"Transition team snag list, indent 7-8, dry/wet run, testing & commissioning and HOTO document"},
+  {workflowId:"WF-136", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Projects Team", task:"Documents (QAP, WMS, MIR, O&M Manuals)"},
+  {workflowId:"WF-137", stage:"Closure Stage", sub:"Desnagging, Testing, Automation & Virtual Completion", dept:"Transition Team", task:"Snag points / modification if any"},
 
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Engg. Team"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
-  {stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
+  {workflowId:"WF-138", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Contracts & Commercial", task:"Billing and collections, client feedback"},
+  {workflowId:"WF-139", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Final shade of piping paint, tank, filter", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-140", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"Paint dft should be mentioned in document", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-141", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Technical Team", task:"As built submission and PFD dashboard provided to site team", technicalTask:"Detail Engg. Team"},
+  {workflowId:"WF-142", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Purchase Team", task:"Provide vendor support and OEM manuals if required"},
+  {workflowId:"WF-143", stage:"Closure Stage", sub:"Finishing, Painting & Marking", dept:"Projects Team", task:"Dry/wet run, HOTO, testing, commissioning, handover documents, O&M proposal and commissioning team involvement"},
 
-  {stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"For new technology or new equipment, performance shall be closely monitored, and feedback shall be obtained from the operations team. Site visits may be conducted if required.", technicalTask:"Process Team"},
-  {stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"Full Involvement of Services post de-snagging", technicalTask:"Process Team"},
+  {workflowId:"WF-144", stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"For new technology or new equipment, performance shall be closely monitored, and feedback shall be obtained from the operations team. Site visits may be conducted if required.", technicalTask:"Process Team"},
+  {workflowId:"WF-145", stage:"Closure Stage", sub:"Commissioning & Handing over", dept:"Technical Team", task:"Full Involvement of Services post de-snagging", technicalTask:"Process Team"},
 
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Contracts & Commercial", task:"Customer feedback, financial reconciliation, project closure, billing and collections"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Technical Team", task:"Final Technical Support", technicalTask:"Process Team"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Purchase Team", task:"Leftover material list from site"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Projects Team", task:"Completion checklist and final payment reconciliation"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Transition Team", task:"Takeover the site if O&M is in WAPP scope; otherwise facilitate the site"},
-  {stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Purchase Team", task:"Balance item ordering"},
-  {stage:"DLP Period", sub:"RBG / DLP Period", dept:"Contracts & Commercial", task:"Submission of RBG as per defined DLP period"},
-  {stage:"DLP Period", sub:"DLP Period", dept:"Projects Team", task:"Periodical plant visit if O&M is not being carried out by WAPP"}
+  {workflowId:"WF-146", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Contracts & Commercial", task:"Customer feedback, financial reconciliation, project closure, billing and collections"},
+  {workflowId:"WF-147", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Technical Team", task:"Final Technical Support", technicalTask:"Process Team"},
+  {workflowId:"WF-148", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Purchase Team", task:"Leftover material list from site"},
+  {workflowId:"WF-149", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Projects Team", task:"Completion checklist and final payment reconciliation"},
+  {workflowId:"WF-150", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Transition Team", task:"Takeover the site if O&M is in WAPP scope; otherwise facilitate the site"},
+  {workflowId:"WF-151", stage:"Closure Stage", sub:"HOTO & Project Closure", dept:"Purchase Team", task:"Balance item ordering"},
+  {workflowId:"WF-152", stage:"DLP Period", sub:"RBG / DLP Period", dept:"Contracts & Commercial", task:"Submission of RBG as per defined DLP period"},
+  {workflowId:"WF-153", stage:"DLP Period", sub:"DLP Period", dept:"Projects Team", task:"Periodical plant visit if O&M is not being carried out by WAPP"}
 ];
 
 function uid(){ return Math.random().toString(36).slice(2)+Date.now().toString(36); }
@@ -999,6 +999,61 @@ function normalizeDateFields(obj){
   });
 }
 
+function firebaseCollectionToArray(value){
+  if(Array.isArray(value)) return value.filter(item=>item!==undefined&&item!==null);
+  if(value&&typeof value==='object'){
+    return Object.keys(value)
+      .sort((a,b)=>{
+        const numericA=/^\d+$/.test(a),numericB=/^\d+$/.test(b);
+        if(numericA&&numericB) return Number(a)-Number(b);
+        if(numericA!==numericB) return numericA?-1:1;
+        return a.localeCompare(b);
+      })
+      .map(key=>value[key])
+      .filter(item=>item!==undefined&&item!==null);
+  }
+  return [];
+}
+
+function normalizeDatabaseCollections(){
+  let changed=0;
+  if(!Array.isArray(db.projects)){
+    db.projects=firebaseCollectionToArray(db.projects);
+    changed++;
+  }
+  if(!Array.isArray(db.activity)){
+    db.activity=firebaseCollectionToArray(db.activity);
+    changed++;
+  }
+  db.projects.forEach(project=>{
+    if(!project||typeof project!=='object') return;
+    if(!Array.isArray(project.tasks)){
+      project.tasks=firebaseCollectionToArray(project.tasks);
+      changed++;
+    }
+    if(project.duplicateMergeArchive&&!Array.isArray(project.duplicateMergeArchive)){
+      project.duplicateMergeArchive=firebaseCollectionToArray(project.duplicateMergeArchive);
+      changed++;
+    }
+    project.tasks.forEach(task=>{
+      if(!task||typeof task!=='object') return;
+      if(!Array.isArray(task.history)){
+        task.history=firebaseCollectionToArray(task.history);
+        changed++;
+      }
+      if(task.mergeConflicts&&!Array.isArray(task.mergeConflicts)){
+        task.mergeConflicts=firebaseCollectionToArray(task.mergeConflicts);
+        changed++;
+      }
+      if(task.mergedTaskIds&&!Array.isArray(task.mergedTaskIds)){
+        task.mergedTaskIds=firebaseCollectionToArray(task.mergedTaskIds);
+        changed++;
+      }
+    });
+  });
+  return changed;
+}
+
 function normalizeLegacyTaskShape(task){
   if(!task || typeof task!=='object') return false;
   let changed=false;
@@ -1022,15 +1077,19 @@ function normalizeLegacyTaskShape(task){
 }
 
 function normalizeAllDates(){
+  let changed=normalizeDatabaseCollections();
   resetRuntimeCaches();
   (db.projects||[]).forEach(project=>{
     normalizeDateFields(project);
     (project.tasks||[]).forEach(task=>{
-      normalizeLegacyTaskShape(task);
+      if(normalizeLegacyTaskShape(task)) changed++;
       normalizeDateFields(task);
     });
+    // Identity-only migration: protects existing records but never adds a task.
+    changed+=ensureWorkflowIdsForProject(project);
     ensureStageDates(project);
   });
+  return changed;
 }
 
 function canonicalTaskText(value){
@@ -1374,16 +1433,91 @@ function applyMinorTaskUpdates(){
 }
 
 let workflowSyncRunning = false;
-function templateTaskKey(t){
-  // Unique workflow identity. technicalTask is intentionally ignored here:
-  // otherwise the same task can be duplicated when a Technical Team assignment is changed later.
+
+/* ===== STABLE WORKFLOW ID + LOSSLESS DUPLICATE CONTROL V24 =====
+   workflowId is permanent and must not be changed when task wording is edited.
+   Exact duplicates are merged only after an Admin review. Every pre-merge task
+   is retained in project.duplicateMergeArchive so the operation is reversible.
+*/
+function legacyTemplateTaskKey(t){
   return [
-    t.stage || "",
-    t.sub || "",
-    t.dept || "",
-    canonicalTaskText(t.task)
+    canonicalTaskText(t?.stage || ""),
+    canonicalTaskText(t?.sub || ""),
+    canonicalTaskText(t?.dept || ""),
+    canonicalTaskText(t?.task || "")
   ].join("|||");
 }
+
+function templateTaskKey(t){
+  const workflowId=String(t?.workflowId||"").trim();
+  return workflowId ? `workflow|||${workflowId}` : `legacy|||${legacyTemplateTaskKey(t)}`;
+}
+
+function duplicateTaskKey(t){
+  // Exact duplicate identity intentionally ignores workflowId and Technical sub-team.
+  return legacyTemplateTaskKey(t);
+}
+
+function workflowGroupKey(t){
+  return [
+    canonicalTaskText(t?.stage || ""),
+    canonicalTaskText(t?.sub || ""),
+    canonicalTaskText(t?.dept || "")
+  ].join("|||");
+}
+
+function taskOriginInfo(task){
+  const created=(Array.isArray(task?.history)?task.history:[]).find(entry=>canonicalTaskText(entry?.action)==="created");
+  const details=canonicalTaskText(created?.details||"");
+  if(details.includes("added from updated workflow template")) return {key:"updated-template",label:"Added after workflow update"};
+  if(details.includes("created from workflow template")) return {key:"original-template",label:"Original project workflow task"};
+  if(details.includes("manually added")) return {key:"manual",label:"Manually added"};
+  if(task?.workflowId) return {key:"workflow",label:"Workflow task"};
+  return {key:"legacy",label:"Legacy / source not recorded"};
+}
+
+function ensureWorkflowIdsForProject(project){
+  if(!project||!Array.isArray(project.tasks)) return 0;
+  let assigned=0;
+
+  // First use exact legacy identity. All exact duplicates receive the same stable ID
+  // so the duplicate reviewer can consolidate them safely afterwards.
+  WORKFLOW_TEMPLATE.forEach(template=>{
+    const key=legacyTemplateTaskKey(template);
+    project.tasks.forEach(task=>{
+      if(!task.workflowId && legacyTemplateTaskKey(task)===key){
+        task.workflowId=template.workflowId;
+        assigned++;
+      }
+    });
+  });
+
+  // Conservative rename recovery: only a unique one-to-one unmatched workflow task
+  // inside the same Stage/Sub-stage/Department group receives the remaining ID.
+  const usedIds=new Set(project.tasks.map(task=>String(task.workflowId||"").trim()).filter(Boolean));
+  const templatesByGroup=new Map();
+  WORKFLOW_TEMPLATE.forEach(template=>{
+    if(usedIds.has(template.workflowId)) return;
+    const key=workflowGroupKey(template);
+    if(!templatesByGroup.has(key)) templatesByGroup.set(key,[]);
+    templatesByGroup.get(key).push(template);
+  });
+
+  templatesByGroup.forEach((templates,groupKey)=>{
+    const candidates=project.tasks.filter(task=>{
+      if(task.workflowId||workflowGroupKey(task)!==groupKey) return false;
+      const origin=taskOriginInfo(task).key;
+      return origin==="original-template"||origin==="updated-template"||origin==="workflow";
+    });
+    if(templates.length===1&&candidates.length===1){
+      candidates[0].workflowId=templates[0].workflowId;
+      assigned++;
+    }
+  });
+
+  return assigned;
+}
+
 function createWorkflowTaskFromTemplate(template, project, sourceText){
   const task = {
     ...template,
@@ -1392,7 +1526,7 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
     status: "To Do",
     remarks: "",
     delayReason: "",
-    lastUpdated: new Date().toLocaleString(),
+    lastUpdated: new Date().toISOString(),
     history: []
   };
   if(task.dept === "Technical Team") task.technicalTask = normalizeTechnicalTaskName(task.technicalTask);
@@ -1401,52 +1535,359 @@ function createWorkflowTaskFromTemplate(template, project, sourceText){
 }
 
 function syncWorkflowTemplateToExistingProjects(){
-  if(!Array.isArray(db.projects)) return 0;
-  let added=0;
+  if(!Array.isArray(db.projects)) normalizeDatabaseCollections();
+  let added=0,idsAssigned=0;
+  const blocked=[];
   db.projects.forEach(project=>{
-    if(!Array.isArray(project.tasks)) project.tasks=[];
-    const existing=new Set(project.tasks.map(templateTaskKey));
+    if(!project||typeof project!=='object') return;
+    // Never erase an object-shaped Firebase task collection.
+    if(!Array.isArray(project.tasks)) project.tasks=firebaseCollectionToArray(project.tasks);
+    const projectIdsAssigned=ensureWorkflowIdsForProject(project);
+    idsAssigned+=projectIdsAssigned;
+    const existingIds=new Set(project.tasks.map(task=>String(task.workflowId||"").trim()).filter(Boolean));
+    const existingLegacyKeys=new Set(project.tasks.map(legacyTemplateTaskKey));
+    const missing=WORKFLOW_TEMPLATE.filter(template=>
+      !existingIds.has(template.workflowId)&&!existingLegacyKeys.has(legacyTemplateTaskKey(template))
+    );
+
+    // A normal template revision adds only a small number of tasks. If an established
+    // project appears to be missing a large portion, stop instead of recreating the list.
+    const establishedProject=project.tasks.length>0;
+    const suspiciousLimit=Math.max(12,Math.ceil(WORKFLOW_TEMPLATE.length*0.20));
+    if(establishedProject&&missing.length>=suspiciousLimit){
+      blocked.push({
+        project:project.name||project.jobCode||"Untitled Project",
+        existing:project.tasks.length,
+        missing:missing.length
+      });
+      if(projectIdsAssigned){ invalidateProjectCache(project,true); ensureStageDates(project); }
+      return;
+    }
+
     let projectAdded=0;
-    WORKFLOW_TEMPLATE.forEach(template=>{
-      const key=templateTaskKey(template); if(existing.has(key)) return;
+    missing.forEach(template=>{
       project.tasks.push(createWorkflowTaskFromTemplate(template,project,'Task added from updated workflow template'));
-      existing.add(key); added++; projectAdded++;
+      existingIds.add(template.workflowId);
+      existingLegacyKeys.add(legacyTemplateTaskKey(template));
+      added++; projectAdded++;
     });
-    if(projectAdded){ invalidateProjectCache(project,true); ensureStageDates(project); }
+    if(projectAdded||projectIdsAssigned){
+      project.workflowTemplateVersion='V26';
+      project.workflowTemplateSyncedAt=new Date().toISOString();
+      invalidateProjectCache(project,true);
+      ensureStageDates(project);
+    }
   });
-  return added;
+  return {added,idsAssigned,blocked};
 }
 
 function manualSyncWorkflowTemplate(){
   if(!requirePermission(currentUserRole==="Admin","Only Admin can sync template tasks.")) return;
-  if(!confirm("This will add only missing workflow-template tasks to existing projects. It will not overwrite existing task status/data. Continue?")) return;
-  const added = syncWorkflowTemplateToExistingProjects();
-  alert(added ? (added + " missing template task(s) added.") : "No missing template tasks found.");
-  if(added) save();
+  if(!confirm("Task editing never runs this sync. This separate Admin action will first protect existing tasks with permanent workflow IDs and then add only a small number of genuinely missing template tasks. If the tracker detects that a large part of the workflow appears missing, it will BLOCK the sync instead of recreating the full list. Continue?")) return;
+  normalizeDatabaseCollections();
+  const result=syncWorkflowTemplateToExistingProjects();
+  const message=[
+    result.idsAssigned ? `${result.idsAssigned} existing task(s) protected with permanent workflow IDs` : "No existing task IDs needed migration",
+    result.added ? `${result.added} genuinely missing template task(s) added` : "No genuine missing tasks were added",
+    result.blocked?.length ? `${result.blocked.length} project(s) blocked from unsafe bulk recreation:\n${result.blocked.map(item=>`• ${item.project}: ${item.missing} tasks appeared missing while ${item.existing} records already existed`).join("\n")}` : "No unsafe bulk recreation detected"
+  ].join(". ")+".";
+  alert(message);
+  if(result.added||result.idsAssigned) void persistDatabase({immediate:true});
 }
 
 function findDuplicateTasks(project){
-  const groups = {};
-  (project.tasks || []).forEach(t => {
-    const key = templateTaskKey(t);
-    if(!groups[key]) groups[key] = [];
-    groups[key].push(t);
+  const tasks=Array.isArray(project?.tasks)?project.tasks:[];
+  const parent=tasks.map((_,index)=>index);
+  const find=index=>{ while(parent[index]!==index){ parent[index]=parent[parent[index]]; index=parent[index]; } return index; };
+  const union=(a,b)=>{ const rootA=find(a),rootB=find(b); if(rootA!==rootB) parent[rootB]=rootA; };
+  const byExact=new Map(),byWorkflowId=new Map();
+  tasks.forEach((task,index)=>{
+    const exactKey=duplicateTaskKey(task);
+    if(byExact.has(exactKey)) union(index,byExact.get(exactKey)); else byExact.set(exactKey,index);
+    const workflowId=String(task?.workflowId||"").trim();
+    if(workflowId){
+      if(byWorkflowId.has(workflowId)) union(index,byWorkflowId.get(workflowId)); else byWorkflowId.set(workflowId,index);
+    }
   });
-  return Object.values(groups).filter(group => group.length > 1);
+  const groups=new Map();
+  tasks.forEach((task,index)=>{
+    const root=find(index);
+    if(!groups.has(root)) groups.set(root,[]);
+    groups.get(root).push(task);
+  });
+  return [...groups.values()].filter(group=>group.length>1);
+}
+
+function taskTextSimilarity(a,b){
+  const left=canonicalTaskText(a),right=canonicalTaskText(b);
+  if(!left||!right) return 0;
+  if(left===right) return 1;
+  const leftTokens=new Set(left.split(" ").filter(Boolean));
+  const rightTokens=new Set(right.split(" ").filter(Boolean));
+  const intersection=[...leftTokens].filter(token=>rightTokens.has(token)).length;
+  const dice=(2*intersection)/(leftTokens.size+rightTokens.size||1);
+  const containment=(left.includes(right)||right.includes(left))?Math.min(left.length,right.length)/Math.max(left.length,right.length):0;
+  return Math.max(dice,containment);
+}
+
+function findPotentialWordingDuplicates(project){
+  const tasks=Array.isArray(project?.tasks)?project.tasks:[];
+  const pairs=[];
+  for(let i=0;i<tasks.length;i++){
+    for(let j=i+1;j<tasks.length;j++){
+      const a=tasks[i],b=tasks[j];
+      if(workflowGroupKey(a)!==workflowGroupKey(b)) continue;
+      if(duplicateTaskKey(a)===duplicateTaskKey(b)) continue;
+      const idA=String(a.workflowId||"").trim(),idB=String(b.workflowId||"").trim();
+      if(idA&&idA===idB) continue;
+      const origins=[taskOriginInfo(a).key,taskOriginInfo(b).key];
+      if(!origins.includes("updated-template")) continue;
+      if(!origins.some(origin=>origin==="original-template"||origin==="workflow"||origin==="legacy")) continue;
+      const similarity=taskTextSimilarity(a.task,b.task);
+      if(similarity>=0.72) pairs.push({a,b,similarity});
+    }
+  }
+  return pairs.sort((x,y)=>y.similarity-x.similarity);
+}
+
+function collectDuplicateTaskReport(){
+  const projects=[];
+  (db.projects||[]).forEach(project=>{
+    const groups=findDuplicateTasks(project);
+    const potentials=findPotentialWordingDuplicates(project);
+    if(groups.length||potentials.length) projects.push({project,groups,potentials});
+  });
+  return projects;
+}
+
+function meaningfulTaskValue(value){
+  return value!==undefined&&value!==null&&String(value).trim()!=="";
+}
+
+const DUPLICATE_MERGE_FIELDS=[
+  "workflowId","technicalTask","owner","planning","visitorPerson","siteReport",
+  "checkPoints","checkingPerson","qualityCheckReport","monthlyCorrespondence",
+  "budget","expensesIncurred","plannedBilling","actualBilling","collection",
+  "remarks","delayReason","doneAt","doneDate","doneBy","doneTimestampSource"
+];
+
+function taskSurvivorScore(task){
+  const statusRank={"To Do":0,"In Progress":1,"Done":2}[task?.status]||0;
+  const populated=DUPLICATE_MERGE_FIELDS.filter(field=>meaningfulTaskValue(task?.[field])).length;
+  const historyCount=Array.isArray(task?.history)?task.history.length:0;
+  const origin=taskOriginInfo(task).key;
+  const originWeight=origin==="original-template"?8:origin==="manual"?6:origin==="updated-template"?4:2;
+  return statusRank*100+populated*8+historyCount*2+originWeight;
+}
+
+function uniqueHistoryEntries(entries){
+  const seen=new Set();
+  return entries.filter(entry=>{
+    const key=JSON.stringify([entry?.at||"",entry?.by||"",entry?.action||"",entry?.details||""]);
+    if(seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+
+function combineNarrativeField(survivor,duplicate,field){
+  const incoming=String(duplicate?.[field]||"").trim();
+  const current=String(survivor?.[field]||"").trim();
+  if(!incoming) return;
+  if(!current){ survivor[field]=incoming; return; }
+  if(canonicalTaskText(current)===canonicalTaskText(incoming)) return;
+  survivor[field]=`${current}\n\n[Merged from duplicate ${duplicate.id||"record"}]\n${incoming}`;
+}
+
+function mergeDuplicateGroup(project,group,batchId){
+  const ranked=group.map((task,index)=>({task,index,score:taskSurvivorScore(task)}))
+    .sort((a,b)=>b.score-a.score||a.index-b.index);
+  const survivor=ranked[0].task;
+  const removed=group.filter(task=>task!==survivor);
+  const snapshot=JSON.parse(JSON.stringify(group));
+  if(!Array.isArray(project.duplicateMergeArchive)) project.duplicateMergeArchive=[];
+  project.duplicateMergeArchive.push({
+    batchId,
+    mergedAt:new Date().toISOString(),
+    mergedBy:currentUserEmail||currentUser||"Unknown User",
+    survivorTaskId:survivor.id,
+    reason:group.some((task,index)=>group.slice(index+1).some(other=>String(task.workflowId||"").trim()&&String(task.workflowId||"").trim()===String(other.workflowId||"").trim()))?"Verified duplicate: same permanent workflow ID":"Exact duplicate: same Stage, Sub-stage, Department and Task name",
+    sourceTasks:snapshot
+  });
+
+  const statusRank={"To Do":0,"In Progress":1,"Done":2};
+  const bestStatus=group.map(task=>task.status||"To Do").sort((a,b)=>(statusRank[b]||0)-(statusRank[a]||0))[0]||"To Do";
+  survivor.status=bestStatus;
+  if(!Array.isArray(survivor.mergeConflicts)) survivor.mergeConflicts=[];
+
+  removed.forEach(duplicate=>{
+    DUPLICATE_MERGE_FIELDS.forEach(field=>{
+      if(field==="remarks"||field==="delayReason") return;
+      const incoming=duplicate[field];
+      const current=survivor[field];
+      if(!meaningfulTaskValue(current)&&meaningfulTaskValue(incoming)) survivor[field]=incoming;
+      else if(meaningfulTaskValue(current)&&meaningfulTaskValue(incoming)&&String(current)!==String(incoming)){
+        survivor.mergeConflicts.push({
+          mergedAt:new Date().toISOString(),
+          sourceTaskId:duplicate.id||"",
+          field,
+          keptValue:current,
+          preservedValue:incoming
+        });
+      }
+    });
+    combineNarrativeField(survivor,duplicate,"remarks");
+    combineNarrativeField(survivor,duplicate,"delayReason");
+  });
+
+  survivor.history=uniqueHistoryEntries(group.flatMap(task=>Array.isArray(task.history)?task.history:[]));
+  survivor.mergedTaskIds=[...new Set([...(survivor.mergedTaskIds||[]),...removed.map(task=>task.id).filter(Boolean)])];
+  survivor.lastUpdated=new Date().toISOString();
+  addHistory(survivor,"Duplicates safely merged",`${removed.length} duplicate task record(s) consolidated. Complete originals retained in project duplicateMergeArchive batch ${batchId}.`);
+
+  const sourceIds=new Set(removed.map(task=>String(task.id||"")).filter(Boolean));
+  (db.activity||[]).forEach(activity=>{
+    const activityTaskId=String(activity?.taskId||"");
+    if(sourceIds.has(activityTaskId)){
+      if(!activity.originalTaskId) activity.originalTaskId=activityTaskId;
+      activity.taskId=survivor.id;
+      activity.taskName=survivor.task;
+      activity.duplicateMergeBatchId=batchId;
+    }
+  });
+
+  const removedObjects=new Set(removed);
+  project.tasks=project.tasks.filter(task=>!removedObjects.has(task));
+  addGlobalActivity(project,survivor,"Duplicate Tasks Merged",`${removed.length} verified duplicate record(s) merged without deleting source data; archive batch ${batchId}.`);
+  return removed.length;
+}
+
+function templateDuplicateCount(){
+  const groups={};
+  WORKFLOW_TEMPLATE.forEach(task=>{
+    const key=duplicateTaskKey(task);
+    groups[key]=(groups[key]||0)+1;
+  });
+  return Object.values(groups).filter(count=>count>1).length;
 }
 
 function showDuplicateTaskReport(){
-  const lines = [];
-  (db.projects || []).forEach(project => {
-    const duplicates = findDuplicateTasks(project);
-    if(duplicates.length){
-      lines.push(project.name || project.jobCode || "Untitled Project");
-      duplicates.forEach(group => {
-        lines.push(" - " + (group[0].task || "Unnamed task") + " (" + group.length + " entries)");
-      });
-    }
+  normalizeDatabaseCollections();
+  (db.projects||[]).forEach(project=>ensureWorkflowIdsForProject(project));
+  const report=collectDuplicateTaskReport();
+  const groupCount=report.reduce((sum,item)=>sum+item.groups.length,0);
+  const extraEntries=report.reduce((sum,item)=>sum+item.groups.reduce((n,group)=>n+group.length-1,0),0);
+  const potentialCount=report.reduce((sum,item)=>sum+(item.potentials||[]).length,0);
+  const rows=[];
+  const potentialRows=[];
+  report.forEach(({project,groups,potentials})=>{
+    groups.forEach((group,groupIndex)=>group.forEach((task,index)=>{
+    const origin=taskOriginInfo(task);
+    rows.push(`<tr>
+      <td>${esc(project.name||project.jobCode||"Untitled Project")}</td>
+      <td>${groupIndex+1}</td>
+      <td>${esc(task.stage||"")}</td>
+      <td>${esc(task.sub||"")}</td>
+      <td>${esc(departmentLabel(task))}</td>
+      <td>${esc(task.task||"Unnamed task")}</td>
+      <td>${esc(origin.label)}</td>
+      <td>${esc(task.owner||"-")}</td>
+      <td>${esc(task.status||"To Do")}</td>
+      <td>${esc(task.lastUpdated||"-")}</td>
+      <td>${(task.history||[]).length}</td>
+    </tr>`);
+    }));
+    (potentials||[]).forEach(pair=>{
+      const mergeButton=pair.a.id&&pair.b.id&&currentUserRole==="Admin"?`<button class="small primary" onclick="safeMergePotentialPair('${escAttr(project.id)}','${escAttr(pair.a.id)}','${escAttr(pair.b.id)}')">Review & Merge Pair</button>`:"-";
+      potentialRows.push(`<tr><td>${esc(project.name||project.jobCode||"Untitled Project")}</td><td>${esc(pair.a.stage||"")}</td><td>${esc(pair.a.sub||"")}</td><td>${esc(departmentLabel(pair.a))}</td><td>${esc(pair.a.task||"")}</td><td>${esc(taskOriginInfo(pair.a).label)}</td><td>${esc(pair.b.task||"")}</td><td>${esc(taskOriginInfo(pair.b).label)}</td><td>${Math.round(pair.similarity*100)}%</td><td>${mergeButton}</td></tr>`);
+    });
   });
-  alert(lines.length ? ("Duplicate tasks found:\n\n" + lines.join("\n")) : "No duplicate tasks found.");
+
+  document.getElementById("modalTitle").textContent="Duplicate Task Review";
+  document.getElementById("modalBody").innerHTML=`
+    <div class="note"><b>Safe rule:</b> automatic consolidation applies only when tasks have the same permanent workflow ID or the same Stage, Sub-stage, Department and Task name. Similar wording is shown separately for human review and is never auto-merged.</div>
+    <div class="grid grid-4" style="margin-top:12px">
+      <div class="kpi"><div class="lbl">Duplicate Groups</div><div class="num">${groupCount}</div></div>
+      <div class="kpi"><div class="lbl">Extra Task Records</div><div class="num">${extraEntries}</div></div>
+      <div class="kpi"><div class="lbl">Potential Wording Pairs</div><div class="num">${potentialCount}</div></div>
+      <div class="kpi"><div class="lbl">Duplicates in Current Template</div><div class="num">${templateDuplicateCount()}</div></div>
+    </div>
+    ${rows.length?`<h3>Verified Duplicate Groups</h3><div class="table-scroll" style="margin-top:8px;max-height:40vh"><table><tr><th>Project</th><th>Group</th><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task</th><th>Created Source</th><th>Owner</th><th>Status</th><th>Last Updated</th><th>History</th></tr>${rows.join("")}</table></div>`:'<p class="muted" style="margin-top:14px">No verified duplicate tasks found in the loaded project data.</p>'}
+    ${potentialRows.length?`<h3 style="margin-top:16px">Potential Old/Updated Wording Pairs — Manual Review Only</h3><div class="table-scroll" style="margin-top:8px;max-height:35vh"><table><tr><th>Project</th><th>Stage</th><th>Sub-stage</th><th>Department</th><th>Task A</th><th>Source A</th><th>Task B</th><th>Source B</th><th>Similarity</th><th>Action</th></tr>${potentialRows.join("")}</table></div>`:''}
+    <div class="lock-note">Before merging, the tracker downloads a complete JSON backup. It also stores every original duplicate—including all fields and history—inside each project\'s <b>duplicateMergeArchive</b>. Activity records are remapped to the surviving task instead of being discarded.</div>
+    <div class="row" style="margin-top:14px"><button onclick="closeModal()">Close</button>${rows.length&&currentUserRole==="Admin"?'<button class="primary" onclick="closeModal();safeMergeDuplicateTasks()">Safely Merge Verified Duplicates</button>':''}</div>`;
+  document.getElementById("modal").classList.remove("hidden");
+}
+
+function safeMergePotentialPair(projectId,taskIdA,taskIdB){
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can merge duplicate tasks.")) return;
+  const project=(db.projects||[]).find(item=>item.id===projectId);
+  const taskA=(project?.tasks||[]).find(item=>item.id===taskIdA);
+  const taskB=(project?.tasks||[]).find(item=>item.id===taskIdB);
+  if(!project||!taskA||!taskB){ alert("One of the task records is no longer available. Refresh the duplicate report."); return; }
+  if(!confirm(`These task names are similar but not identical:\n\n1. ${taskA.task}\n2. ${taskB.task}\n\nMerge them only if they represent the same responsibility. A complete backup and archive will be created.`)) return;
+  const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+  const backup=JSON.stringify(db,null,2);
+  downloadFile(`project-tracker-before-manual-pair-merge-${stamp}.json`,backup,"application/json");
+  try{ localStorage.setItem(`projectTrackerPrePairMergeBackup_${stamp}`,backup); }catch(error){ console.warn("Pre-merge browser backup could not be stored",error); }
+  const batchId=`PAIR-${Date.now()}`;
+  protectManualActualDates(project);
+  const removed=mergeDuplicateGroup(project,[taskA,taskB],batchId);
+  ensureWorkflowIdsForProject(project);
+  invalidateProjectCache(project,true); ensureStageDates(project); protectManualActualDates(project); resetRuntimeCaches();
+  closeModal(); scheduleActiveRender();
+  void persistDatabase({immediate:true}).then(result=>{
+    if(result?.ok) alert(`${removed} task record safely consolidated after manual review. Both originals remain in duplicateMergeArchive.`);
+    else alert("The pair was consolidated in this browser, but Firebase did not confirm the save. Use the downloaded backup and retry after resolving the save conflict.");
+  });
+}
+
+function repairExistingRepeatedTasks(){
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can repair repeated tasks.")) return;
+  normalizeDatabaseCollections();
+  let protectedCount=0;
+  (db.projects||[]).forEach(project=>{ protectedCount+=ensureWorkflowIdsForProject(project); });
+  const report=collectDuplicateTaskReport();
+  const extraEntries=report.reduce((sum,item)=>sum+item.groups.reduce((n,group)=>n+group.length-1,0),0);
+  if(!extraEntries){
+    if(protectedCount) void persistDatabase({immediate:true});
+    alert(protectedCount?`${protectedCount} existing task(s) were protected with permanent IDs. No exact repeated task records remain.`:"No exact repeated task records were found. Use Review Repeated Tasks for possible renamed/moved pairs.");
+    return;
+  }
+  safeMergeDuplicateTasks();
+}
+
+function safeMergeDuplicateTasks(){
+  normalizeDatabaseCollections();
+  (db.projects||[]).forEach(project=>ensureWorkflowIdsForProject(project));
+  if(!requirePermission(currentUserRole==="Admin","Only Admin can merge duplicate tasks.")) return;
+  const report=collectDuplicateTaskReport();
+  const groupCount=report.reduce((sum,item)=>sum+item.groups.length,0);
+  const extraEntries=report.reduce((sum,item)=>sum+item.groups.reduce((n,group)=>n+group.length-1,0),0);
+  if(!groupCount){ alert("No verified duplicate tasks found. Potential wording pairs, if any, must be reviewed individually from Review Duplicate Tasks."); return; }
+  if(!confirm(`Merge ${extraEntries} extra task record(s) across ${groupCount} verified duplicate group(s)? A full backup will download first, and every original task will remain recoverable in duplicateMergeArchive.`)) return;
+
+  const stamp=new Date().toISOString().replace(/[:.]/g,"-");
+  const backup=JSON.stringify(db,null,2);
+  downloadFile(`project-tracker-before-dedup-${stamp}.json`,backup,"application/json");
+  try{ localStorage.setItem(`projectTrackerPreDedupBackup_${stamp}`,backup); }catch(error){ console.warn("Pre-dedup browser backup could not be stored",error); }
+
+  const batchId=`DEDUP-${Date.now()}`;
+  let removed=0;
+  report.forEach(({project,groups})=>{
+    protectManualActualDates(project);
+    // Work from the precomputed groups so each original task participates once.
+    groups.forEach(group=>{ removed+=mergeDuplicateGroup(project,group,batchId); });
+    ensureWorkflowIdsForProject(project);
+    invalidateProjectCache(project,true);
+    ensureStageDates(project);
+    protectManualActualDates(project);
+  });
+  resetRuntimeCaches();
+  scheduleActiveRender();
+  void persistDatabase({immediate:true}).then(result=>{
+    if(result?.ok) alert(`${removed} duplicate task record(s) safely consolidated. No source task data was discarded. Backup and in-project archive were created.`);
+    else alert(`Duplicates were consolidated in this browser, but Firebase did not confirm the save. The downloaded backup is safe. Refresh and retry after resolving the save conflict.`);
+  });
 }
 
 let dbListenerStarted = false;
@@ -1507,23 +1948,27 @@ function readLocalDatabase(){
   const localCopy=localStorage.getItem('projectTrackerDB');
   if(localCopy){ try{ db=JSON.parse(localCopy); }catch(error){ console.warn('Browser backup was invalid',error); db={projects:[],users:{},activity:[],meta:{revision:0}}; } }
   if(!db||typeof db!=='object') db={projects:[],users:{},activity:[],meta:{revision:0}};
-  if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
+  const collectionMigration=normalizeDatabaseCollections();
+  if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
+  ensureUsers(); applyDeletedProjectTombstones();
+  const dateAndIdentityMigration=normalizeAllDates();
   const technicalLabelsUpdated=applyMinorTaskUpdates();
   resetRuntimeCaches();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup(true);
-  return migrated || technicalLabelsUpdated>0;
+  return migrated || technicalLabelsUpdated>0 || collectionMigration>0 || dateAndIdentityMigration>0;
 }
 
 function applyRemoteDatabase(remoteData){
   db=remoteData&&typeof remoteData==='object'?remoteData:{projects:[],users:{},activity:[],meta:{revision:0}};
-  if(!Array.isArray(db.projects)) db.projects=[]; if(!Array.isArray(db.activity)) db.activity=[]; if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
-  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates();
+  const collectionMigration=normalizeDatabaseCollections();
+  if(!db.meta||typeof db.meta!=='object') db.meta={revision:0};
+  resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones();
+  const dateAndIdentityMigration=normalizeAllDates();
   const technicalLabelsUpdated=applyMinorTaskUpdates();
   const migrated=migrateHistoricalCompletionData();
   lastKnownRemoteRevision=Number(db.meta.revision||0); scheduleLocalBackup();
-  return migrated || technicalLabelsUpdated>0;
+  return migrated || technicalLabelsUpdated>0 || collectionMigration>0 || dateAndIdentityMigration>0;
 }
 
 function load(){
@@ -2372,7 +2817,7 @@ function restoreBackup(event){
   const file=event.target.files[0]; if(!file) return;
   const reader=new FileReader();
   reader.onload=()=>{
-    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); migrateHistoricalCompletionData(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
+    try{ db=JSON.parse(reader.result); resetRuntimeCaches(); normalizeDatabaseCollections(); ensureUsers(); applyDeletedProjectTombstones(); normalizeAllDates(); migrateHistoricalCompletionData(); currentProjectId=null; scheduleLocalBackup(true); showDashboard(); void persistDatabase({immediate:true}); alert('Backup restored.'); }
     catch(error){ alert('Invalid JSON backup.'); }
     finally{ event.target.value=''; }
   };
@@ -2994,6 +3439,9 @@ function prepareDatabaseForSave(){
   (db.projects||[]).forEach(project=>protectManualActualDates(project));
   if(!db.meta||typeof db.meta!=='object') db.meta={};
   db.meta.manualActualDateMode='manual-locked-v21';
+  db.meta.workflowIdentityMode='stable-id-v26';
+  db.meta.editCannotTriggerWorkflowSync='enabled-v26';
+  db.meta.fullTaskRecreationGuard='enabled-v25';
   db.meta.updatedAt=new Date().toISOString(); db.meta.updatedBy=currentUserEmail||currentUser||'Unknown User';
 }
 
@@ -3071,6 +3519,10 @@ function clearActualDateBeforeReopen(project,stage,sub){
 function updateTaskField(projectId,taskId,field,value){
   const project=(db.projects||[]).find(item=>item.id===projectId); const task=(project?.tasks||[]).find(item=>item.id===taskId);
   if(!project||!task) return;
+  // V26 edit barrier: assign and lock the permanent workflow identity BEFORE any editable field changes.
+  // Editing never calls workflow sync and therefore can never insert another template task.
+  ensureWorkflowIdsForProject(project);
+  const lockedWorkflowId=String(task.workflowId||"").trim();
   protectManualActualDates(project);
   if(!canEditTask(task)){ alert('You can only update tasks assigned to you.'); scheduleActiveRender('project'); return; }
   if(field==='owner'&&!canEditProject()){ alert('Only Admin/PM can change owner.'); scheduleActiveRender('project'); return; }
@@ -3089,7 +3541,7 @@ function updateTaskField(projectId,taskId,field,value){
     }
   }
   if(field==='status') stampTaskDoneTransition(task,oldValue,value);
-  task[field]=value; task.lastUpdated=new Date().toISOString();
+  task[field]=value; if(lockedWorkflowId) task.workflowId=lockedWorkflowId; task.lastUpdated=new Date().toISOString();
   const detail=`${field} changed from "${oldValue}" to "${value}"`; addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail);
   invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
   protectManualActualDates(project);
@@ -3106,8 +3558,13 @@ function collectTaskFormData(){
 
 function saveTask(id){
   const project=(db.projects||[]).find(item=>item.id===currentProjectId); if(!project) return;
+  // V26 edit barrier: migrate legacy workflow identity before reading or changing editable fields.
+  // This permanent ID is intentionally absent from the edit form and cannot be overwritten by users.
+  ensureWorkflowIdsForProject(project);
   protectManualActualDates(project);
   const data=collectTaskFormData(); if(!data) return;
+  const duplicate=(project.tasks||[]).find(item=>item.id!==id&&duplicateTaskKey(item)===duplicateTaskKey(data));
+  if(duplicate){ alert(`This exact task already exists under ${duplicate.stage} / ${duplicate.sub} / ${departmentLabel(duplicate)}. Use the duplicate review tool instead of creating another copy.`); return; }
   if(id){
     const task=(project.tasks||[]).find(item=>item.id===id); if(!task) return;
     if(!canFullEditTask(task)){ alert('You do not have permission to edit this task.'); return; }
@@ -3125,7 +3582,7 @@ function saveTask(id){
     }
     stampTaskDoneTransition(task,oldStatus,data.status);
     const changes=[]; Object.keys(data).forEach(key=>{ if(key!=='lastUpdated'&&String(task[key]||'')!==String(data[key]||'')) changes.push(`${key}: "${task[key]||''}" → "${data[key]||''}"`); });
-    const structural=task.stage!==data.stage||task.sub!==data.sub; Object.assign(task,data);
+    const structural=task.stage!==data.stage||task.sub!==data.sub; const lockedWorkflowId=String(task.workflowId||"").trim(); Object.assign(task,data); if(lockedWorkflowId) task.workflowId=lockedWorkflowId;
     if(changes.length){ const detail=changes.join('; '); addHistory(task,'Updated',detail); addGlobalActivity(project,task,'Task Updated',detail); }
     invalidateProjectCache(project,structural); if(structural) ensureStageDates(project);
     protectManualActualDates(project);
